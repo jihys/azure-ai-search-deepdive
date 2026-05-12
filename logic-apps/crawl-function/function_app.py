@@ -23,13 +23,16 @@ Storage 접근:
 import json
 import logging
 import os
+import tempfile
 import time
 from datetime import datetime, timezone
 
 import azure.functions as func
+from azure.core.exceptions import ResourceExistsError
 from azure.identity import ManagedIdentityCredential
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 from precedent_crawler import (
     LawPrecedentCrawler,
@@ -67,9 +70,14 @@ def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
     except (ValueError, AttributeError):
         body = {}
 
-    source = body.get("source", "all")
-    max_pages = int(body.get("max_pages", DEFAULT_MAX_PAGES))
-    triggered_by = body.get("triggered_by", "manual")
+    source = req.params.get("source") or body.get("source", "all")
+    triggered_by = req.params.get("triggered_by") or body.get("triggered_by", "manual")
+
+    raw_max_pages = req.params.get("max_pages") or body.get("max_pages", DEFAULT_MAX_PAGES)
+    try:
+        max_pages = int(raw_max_pages)
+    except (TypeError, ValueError):
+        max_pages = DEFAULT_MAX_PAGES
 
     targets = list(_CRAWLERS.keys()) if source == "all" else [source]
     if source not in list(_CRAWLERS.keys()) + ["all"]:
@@ -79,7 +87,11 @@ def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     max_pages_val = max_pages if max_pages > 0 else None
-    detail_workers = int(body.get("detail_workers", CRAWL_DETAIL_WORKERS))
+    raw_detail_workers = req.params.get("detail_workers") or body.get("detail_workers", CRAWL_DETAIL_WORKERS)
+    try:
+        detail_workers = int(raw_detail_workers)
+    except (TypeError, ValueError):
+        detail_workers = CRAWL_DETAIL_WORKERS
 
     logging.info(
         f"Crawl start: source={source}, max_pages={max_pages_val}, "
@@ -93,6 +105,7 @@ def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
     total_pre_existing = 0
     retried_sources = {}
     counts = {}
+    crawl_logs = {}
 
     blob_client = _make_blob_client()
 
@@ -115,9 +128,11 @@ def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 total_pre_existing += res["pre_existing"]
                 retried_sources[target] = max(res["crawl_attempts"] - 1, 0)
                 counts[target] = res["doc_count"]
+                crawl_logs[target] = res.get("crawl_log_path")
             except Exception as e:
                 logging.error(f"[{target}] 처리 실패: {e}")
                 counts[target] = 0
+                crawl_logs[target] = None
 
     elapsed = round((datetime.now(timezone.utc) - start).total_seconds(), 2)
     result = {
@@ -131,6 +146,7 @@ def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
         "total_skipped_existing": total_skipped_existing,
         "total_upload_failed": total_upload_failed,
         "retried_sources": retried_sources,
+        "crawl_logs": crawl_logs,
         "elapsed_seconds": elapsed,
         "timestamp": start.isoformat(),
     }
@@ -196,13 +212,27 @@ def _process_source(
     saved = []
     upload_failed = 0
     doc_count = 0
+    skipped_existing = 0
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    crawl_log_path = None
+
+    state_lock = Lock()
+    log_lock = Lock()
+    log_file = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".jsonl", delete=False)
+
+    def _write_log(entry: dict) -> None:
+        with log_lock:
+            log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def _on_doc(doc: dict) -> None:
         """상세 페이지 1건 크롤링 완료 시 즉시 Blob 업로드"""
-        nonlocal upload_failed, doc_count
-        doc_count += 1
+        nonlocal upload_failed, doc_count, skipped_existing
+        with state_lock:
+            doc_count += 1
+
         if not container:
             return
+
         seq = doc.get("seq", doc.get("id", "unknown"))
         blob_name = f"{target}/{date_folder}/{target}_{seq}.json"
 
@@ -215,15 +245,33 @@ def _process_source(
                     overwrite=False,
                     content_settings=settings,
                 )
-                saved.append(blob_name)
+                with state_lock:
+                    saved.append(blob_name)
+                _write_log({"seq": str(seq), "blob": blob_name, "status": "uploaded"})
+                last_error = None
+                break
+            except ResourceExistsError:
+                with state_lock:
+                    skipped_existing += 1
+                _write_log({"seq": str(seq), "blob": blob_name, "status": "skipped_existing"})
                 last_error = None
                 break
             except Exception as e:
                 last_error = e
                 if attempt <= UPLOAD_RETRY_COUNT:
                     time.sleep(RETRY_SLEEP_SECONDS)
+
         if last_error is not None:
-            upload_failed += 1
+            with state_lock:
+                upload_failed += 1
+            _write_log(
+                {
+                    "seq": str(seq),
+                    "blob": blob_name,
+                    "status": "failed",
+                    "error": str(last_error),
+                }
+            )
             logging.error(f"Blob 업로드 실패 ({blob_name}): {last_error}")
 
     # 크롤링 실행 — 건별 콜백으로 즉시 업로드
@@ -237,18 +285,46 @@ def _process_source(
     except Exception as e:
         logging.error(f"[{target}] 크롤링 실패: {e}")
 
+    if container:
+        log_file.close()
+        crawl_log_path = f"_logs/{date_folder}/{target}/{run_id}.jsonl"
+        try:
+            with open(log_file.name, "rb") as f:
+                container.upload_blob(
+                    name=crawl_log_path,
+                    data=f,
+                    overwrite=False,
+                    content_settings=ContentSettings(content_type="application/json"),
+                )
+        except Exception as e:
+            logging.warning(f"[{target}] crawl log 업로드 실패: {e}")
+            crawl_log_path = None
+        finally:
+            try:
+                os.unlink(log_file.name)
+            except OSError:
+                pass
+    else:
+        log_file.close()
+        try:
+            os.unlink(log_file.name)
+        except OSError:
+            pass
+
     logging.info(
         f"[{target}] {doc_count}건 수집, {len(saved)}건 저장, "
-        f"기존blob {len(existing_seqs)}건 제외, 업로드실패 {upload_failed}건"
+        f"기존blob {len(existing_seqs)}건 제외, "
+        f"업로드중복 {skipped_existing}건, 업로드실패 {upload_failed}건"
     )
 
     return {
         "saved": saved,
-        "skipped_existing": 0,
+        "skipped_existing": skipped_existing,
         "upload_failed": upload_failed,
         "crawl_attempts": crawl_attempts,
         "doc_count": doc_count,
         "pre_existing": len(existing_seqs),
+        "crawl_log_path": crawl_log_path,
     }
 
 

@@ -1,0 +1,304 @@
+{
+  "definition": {
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "triggers": {
+      "Daily_Schedule_Crawl_and_Preprocess": {
+        "type": "Recurrence",
+        "recurrence": {
+          "frequency": "Day",
+          "interval": 1,
+          "schedule": {
+            "hours": ["6"],
+            "minutes": ["0"]
+          },
+          "timeZone": "Korea Standard Time"
+        },
+        "metadata": {
+          "description": "매일 오전 6시 (KST) - 크롤링 → 청크 생성 전체 파이프라인"
+        }
+      }
+    },
+    "actions": {
+      "Initialize_Today_Date": {
+        "type": "InitializeVariable",
+        "inputs": {
+          "variables": [
+            {
+              "name": "crawlDate",
+              "type": "string",
+              "value": "@{formatDateTime(utcNow(), 'yyyy-MM-dd')}"
+            }
+          ]
+        },
+        "runAfter": {}
+      },
+      "Initialize_Results": {
+        "type": "InitializeVariable",
+        "inputs": {
+          "variables": [
+            {
+              "name": "pipelineResults",
+              "type": "object",
+              "value": {
+                "status": "running",
+                "startedAt": "@{utcNow()}",
+                "crawlDate": "@{variables('crawlDate')}",
+                "crawl": {},
+                "preprocess": {}
+              }
+            }
+          ]
+        },
+        "runAfter": {
+          "Initialize_Today_Date": ["Succeeded"]
+        }
+      },
+      "Call_Crawl_Function_All_Sources": {
+        "type": "Http",
+        "inputs": {
+          "method": "POST",
+          "uri": "@{appsetting('CRAWL_FUNCTION_URI')}",
+          "body": {
+            "source": "all",
+            "max_pages": 0,
+            "detail_workers": 5,
+            "triggered_by": "logic-app-crawl-preprocess"
+          },
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "runAfter": {
+          "Initialize_Results": ["Succeeded"]
+        },
+        "metadata": {
+          "description": "크롤링 Function 호출 - 모든 소스 (prec, detc, expc, admrul) 병렬 처리"
+        },
+        "runtimeConfiguration": {
+          "timeout": "PT3600S"
+        }
+      },
+      "Update_Results_After_Crawl": {
+        "type": "SetVariable",
+        "inputs": {
+          "name": "pipelineResults",
+          "value": "@setProperty(variables('pipelineResults'), 'crawl', json(body('Call_Crawl_Function_All_Sources')))"
+        },
+        "runAfter": {
+          "Call_Crawl_Function_All_Sources": ["Succeeded"]
+        }
+      },
+      "Check_Crawl_Success": {
+        "type": "If",
+        "expression": {
+          "and": [
+            {
+              "equals": [
+                "@body('Call_Crawl_Function_All_Sources')['status']",
+                "success"
+              ]
+            }
+          ]
+        },
+        "actions": {
+          "Parallel_Preprocess_Sources": {
+            "type": "Scope",
+            "actions": {
+              "Preprocess_Prec": {
+                "type": "Http",
+                "inputs": {
+                  "method": "POST",
+                  "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
+                  "body": {
+                    "source": "prec",
+                    "crawl_date": "@{variables('crawlDate')}",
+                    "triggered_by": "logic-app-crawl-preprocess"
+                  },
+                  "headers": {
+                    "Content-Type": "application/json"
+                  }
+                },
+                "metadata": {
+                  "description": "판례 데이터 청크 생성"
+                },
+                "runtimeConfiguration": {
+                  "timeout": "PT1800S"
+                }
+              },
+              "Preprocess_Detc": {
+                "type": "Http",
+                "inputs": {
+                  "method": "POST",
+                  "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
+                  "body": {
+                    "source": "detc",
+                    "crawl_date": "@{variables('crawlDate')}",
+                    "triggered_by": "logic-app-crawl-preprocess"
+                  },
+                  "headers": {
+                    "Content-Type": "application/json"
+                  }
+                },
+                "metadata": {
+                  "description": "헌재 판례 데이터 청크 생성"
+                },
+                "runtimeConfiguration": {
+                  "timeout": "PT1800S"
+                }
+              },
+              "Preprocess_Expc": {
+                "type": "Http",
+                "inputs": {
+                  "method": "POST",
+                  "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
+                  "body": {
+                    "source": "expc",
+                    "crawl_date": "@{variables('crawlDate')}",
+                    "triggered_by": "logic-app-crawl-preprocess"
+                  },
+                  "headers": {
+                    "Content-Type": "application/json"
+                  }
+                },
+                "metadata": {
+                  "description": "법제처 입법예고 데이터 청크 생성"
+                },
+                "runtimeConfiguration": {
+                  "timeout": "PT1800S"
+                }
+              },
+              "Preprocess_Admrul": {
+                "type": "Http",
+                "inputs": {
+                  "method": "POST",
+                  "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
+                  "body": {
+                    "source": "admrul",
+                    "crawl_date": "@{variables('crawlDate')}",
+                    "triggered_by": "logic-app-crawl-preprocess"
+                  },
+                  "headers": {
+                    "Content-Type": "application/json"
+                  }
+                },
+                "metadata": {
+                  "description": "행정심판 판례 데이터 청크 생성"
+                },
+                "runtimeConfiguration": {
+                  "timeout": "PT1800S"
+                }
+              }
+            },
+            "runAfter": {},
+            "metadata": {
+              "description": "4개 소스 청크 생성 병렬 처리"
+            }
+          },
+          "Collect_Preprocess_Results": {
+            "type": "Compose",
+            "inputs": {
+              "prec": "@json(body('Preprocess_Prec'))",
+              "detc": "@json(body('Preprocess_Detc'))",
+              "expc": "@json(body('Preprocess_Expc'))",
+              "admrul": "@json(body('Preprocess_Admrul'))"
+            },
+            "runAfter": {
+              "Parallel_Preprocess_Sources": ["Succeeded"]
+            }
+          },
+          "Update_Final_Results": {
+            "type": "SetVariable",
+            "inputs": {
+              "name": "pipelineResults",
+              "value": "@setProperty(setProperty(variables('pipelineResults'), 'preprocess', outputs('Collect_Preprocess_Results')), 'status', 'completed')"
+            },
+            "runAfter": {
+              "Collect_Preprocess_Results": ["Succeeded"]
+            }
+          }
+        },
+        "else": {
+          "actions": {
+            "Update_Crawl_Failed": {
+              "type": "SetVariable",
+              "inputs": {
+                "name": "pipelineResults",
+                "value": "@setProperty(variables('pipelineResults'), 'status', 'crawl_failed')"
+              },
+              "runAfter": {}
+            }
+          }
+        },
+        "runAfter": {
+          "Update_Results_After_Crawl": ["Succeeded"]
+        }
+      },
+      "Send_Alert_on_Failure": {
+        "type": "If",
+        "expression": {
+          "or": [
+            {
+              "not": {
+                "equals": [
+                  "@variables('pipelineResults')['status']",
+                  "completed"
+                ]
+              }
+            },
+            {
+              "not": {
+                "equals": [
+                  "@body('Call_Crawl_Function_All_Sources')['status']",
+                  "success"
+                ]
+              }
+            }
+          ]
+        },
+        "actions": {
+          "Alert_Email": {
+            "type": "ServiceProvider",
+            "inputs": {
+              "parameters": {
+                "emailMessage": "크롤링 또는 청크 생성 실패\n\n파이프라인 상태:\n@{json(variables('pipelineResults'))}"
+              },
+              "serviceProviderConfiguration": {
+                "serviceProvider": "SendGrid",
+                "connectionName": "sendgrid",
+                "operationName": "SendEmail"
+              }
+            },
+            "runAfter": {}
+          }
+        },
+        "runAfter": {
+          "Check_Crawl_Success": ["Succeeded"]
+        }
+      },
+      "Log_Pipeline_Completion": {
+        "type": "Compose",
+        "inputs": {
+          "status": "@{variables('pipelineResults')['status']}",
+          "completedAt": "@{utcNow()}",
+          "crawlDate": "@{variables('crawlDate')}",
+          "crawlResult": "@{body('Call_Crawl_Function_All_Sources')}",
+          "preprocessResult": "@if(equals(variables('pipelineResults')['status'], 'completed'), outputs('Collect_Preprocess_Results'), null)"
+        },
+        "runAfter": {
+          "Send_Alert_on_Failure": ["Succeeded"]
+        },
+        "metadata": {
+          "description": "최종 파이프라인 실행 결과 로깅"
+        }
+      }
+    },
+    "parameters": {
+      "$connections": {
+        "defaultValue": {},
+        "type": "Object"
+      }
+    }
+  },
+  "kind": "Stateful"
+}

@@ -216,16 +216,22 @@ class _BaseWebCrawler:
         # 1단계: 목록 수집 (스킵 대상 제외)
         items_to_fetch = []
         skipped = 0
+        seen = set()
+        skipped_duplicate = 0
         for item in self.iter_list(query=query, start_page=start_page, max_pages=max_pages):
             seq = item[self.SEQ_FIELD]
             if seq in skip:
                 skipped += 1
                 continue
+            if seq in seen:
+                skipped_duplicate += 1
+                continue
+            seen.add(seq)
             items_to_fetch.append(item)
 
         logger.info(
-            "[%s] 목록 %d건 수집, %d건 스킵(기존), workers=%d",
-            self.SOURCE_NAME, len(items_to_fetch), skipped, max_workers,
+            "[%s] 목록 %d건 수집, %d건 스킵(기존), %d건 스킵(목록중복), workers=%d",
+            self.SOURCE_NAME, len(items_to_fetch), skipped, skipped_duplicate, max_workers,
         )
 
         if not items_to_fetch:

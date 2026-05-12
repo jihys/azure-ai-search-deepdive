@@ -144,7 +144,7 @@
                                     "Create_Markdown_Content": ["Succeeded"]
                                 },
                                 "metadata": {
-                                    "description": "Blob에 업로드 → rag-indexing-workflow가 자동 트리거됨"
+                                    "description": "Blob에 업로드 (레거시 디버그 경로, 기본 운영 미사용)"
                                 }
                             },
                             "Increment_New_Count": {

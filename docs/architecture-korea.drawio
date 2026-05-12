@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="azure-rag-korea-v2" name="Azure RAG Indexing Lab v2 — Korea Central">
-        <mxGraphModel dx="2513" dy="1139" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1700" math="0" shadow="0">
+        <mxGraphModel dx="1931" dy="1139" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1700" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -37,7 +37,7 @@
                 <mxCell id="rg-eus2-note" value="※ Document Intelligence는&#xa;Korea Central 미지원&#xa;→ East US 2에 별도 배포" style="text;html=1;fontSize=8;fontColor=#BF360C;fontStyle=2;align=left;" parent="1" vertex="1">
                     <mxGeometry x="1635" y="152" width="180" height="38" as="geometry"/>
                 </mxCell>
-                <mxCell id="doc-intel" value="di-ragi-{suffix}" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Cognitive_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="doc-intel" value="Azure Document Intelligence" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Cognitive_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="1745" y="210" width="55" height="55" as="geometry"/>
                 </mxCell>
                 <mxCell id="docintel-details" value="kind: FormRecognizer&#xa;Region: East US 2&#xa;prebuilt-layout (PDF→MD)&#xa;publicNetworkAccess: Disabled" style="text;html=1;fontSize=8;fontColor=#424242;align=left;" parent="1" vertex="1">
@@ -52,7 +52,7 @@
                 <mxCell id="vnet-icon" value="" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/networking/Virtual_Networks.svg;" parent="1" vertex="1">
                     <mxGeometry x="100" y="160" width="35" height="35" as="geometry"/>
                 </mxCell>
-                <mxCell id="vnet-label" value="vnet-ragi-{suffix} (10.0.0.0/16) — Korea Central" style="text;html=1;fontSize=11;fontColor=#2E7D32;fontStyle=1;align=left;" parent="1" vertex="1">
+                <mxCell id="vnet-label" value="Virtual Network (10.0.0.0/16) — Korea Central" style="text;html=1;fontSize=11;fontColor=#2E7D32;fontStyle=1;align=left;" parent="1" vertex="1">
                     <mxGeometry x="140" y="167" width="350" height="22" as="geometry"/>
                 </mxCell>
                 <mxCell id="snet-jump" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#E91E63;strokeWidth=1.5;arcSize=3;" parent="1" vertex="1">
@@ -64,7 +64,7 @@
                 <mxCell id="snet-jump-label" value="snet-jump (10.0.3.0/24) — JumpVM Subnet" style="text;html=1;fontSize=9;fontColor=#C62828;fontStyle=1;align=left;" parent="1" vertex="1">
                     <mxGeometry x="513" y="207" width="280" height="18" as="geometry"/>
                 </mxCell>
-                <mxCell id="jumpvm" value="jumpvmragi01&#xa;Win11 Pro | B2s_v2" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/compute/Virtual_Machine.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=8;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="jumpvm" value="Jump VM&#xa;Win11 Pro | B2s_v2" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/compute/Virtual_Machine.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=8;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="560" y="230" width="45" height="45" as="geometry"/>
                 </mxCell>
                 <mxCell id="nsg-jump" value="NSG (RDP:3389)" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/networking/Network_Security_Groups.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=7;" parent="1" vertex="1">
@@ -82,7 +82,7 @@
                 <mxCell id="snet-func-label" value="snet-func (10.0.2.0/24) — Delegated: Web/serverFarms" style="text;html=1;fontSize=9;fontColor=#1565C0;fontStyle=1;align=left;" parent="1" vertex="1">
                     <mxGeometry x="143" y="207" width="300" height="18" as="geometry"/>
                 </mxCell>
-                <mxCell id="func-app" value="func-crawl-ragi&#xa;Python 3.11 | EP1" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/compute/Function_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=8;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="func-app" value="Azure Function App&#xa;Python 3.11 | EP1" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/compute/Function_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=8;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="175" y="230" width="48" height="48" as="geometry"/>
                 </mxCell>
                 <mxCell id="func-desc" value="VNet Integration&#xa;크롤+Verbalize+Split" style="text;html=1;fontSize=8;fontColor=#1565C0;align=left;" parent="1" vertex="1">
@@ -184,19 +184,16 @@
                 <mxCell id="paas-title" value="Azure PaaS Services — Korea Central (publicNetworkAccess = Disabled)" style="text;html=1;fontSize=11;fontColor=#1B3A5C;fontStyle=1;align=left;" parent="1" vertex="1">
                     <mxGeometry x="105" y="715" width="420" height="22" as="geometry"/>
                 </mxCell>
-                <mxCell id="storage" value="stragi{suffix}" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/storage/Storage_Accounts.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="storage" value="Azure Blob Storage" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/storage/Storage_Accounts.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="195" y="750" width="50" height="50" as="geometry"/>
                 </mxCell>
                 <mxCell id="storage-details" value="Standard LRS&#xa;raw-documents&#xa;processed-documents" style="text;html=1;fontSize=7;fontColor=#424242;align=center;" parent="1" vertex="1">
                     <mxGeometry x="165" y="810" width="110" height="35" as="geometry"/>
                 </mxCell>
-                <mxCell id="ai-search" value="search-ragi-{suffix}" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Cognitive_Search.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
-                    <mxGeometry x="435" y="750" width="50" height="50" as="geometry"/>
-                </mxCell>
                 <mxCell id="search-details" value="Standard (S1) | MI&#xa;Semantic: Standard&#xa;4 legal + 2 multimodal indexers" style="text;html=1;fontSize=7;fontColor=#424242;align=center;" parent="1" vertex="1">
                     <mxGeometry x="400" y="815" width="120" height="35" as="geometry"/>
                 </mxCell>
-                <mxCell id="ai-services" value="ais-ragi-{suffix}" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Cognitive_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="ai-services" value="Azure AI Services (OpenAI)" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Cognitive_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="675" y="750" width="50" height="50" as="geometry"/>
                 </mxCell>
                 <mxCell id="aisvc-details" value="kind: AIServices&#xa;embedding-3-large (120K)&#xa;gpt-5.4 (GlobalStd 30K)" style="text;html=1;fontSize=7;fontColor=#424242;align=center;" parent="1" vertex="1">
@@ -205,38 +202,50 @@
                 <mxCell id="docintel-placeholder" value="Doc Intelligence&#xa;↗ East US 2 RG" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=8;fontStyle=2;fontColor=#BF360C;" parent="1" vertex="1">
                     <mxGeometry x="1650" y="702" width="110" height="35" as="geometry"/>
                 </mxCell>
-                <mxCell id="keyvault" value="kv-ragi-{suffix}" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/security/Key_Vaults.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="keyvault" value="Azure Key Vault" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/security/Key_Vaults.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="1135" y="750" width="50" height="50" as="geometry"/>
                 </mxCell>
                 <mxCell id="kv-details" value="RBAC Auth&#xa;Hub 종속성" style="text;html=1;fontSize=7;fontColor=#424242;align=center;" parent="1" vertex="1">
                     <mxGeometry x="1125" y="810" width="70" height="25" as="geometry"/>
                 </mxCell>
-                <mxCell id="foundry-hub" value="hub-ragi-{suffix}" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/AI_Studio.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="foundry-hub" value="Azure AI Foundry Hub" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/AI_Studio.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="1375" y="750" width="50" height="50" as="geometry"/>
                 </mxCell>
                 <mxCell id="hub-details" value="AI Foundry Hub&#xa;ManagedNetwork" style="text;html=1;fontSize=7;fontColor=#424242;align=center;" parent="1" vertex="1">
                     <mxGeometry x="1360" y="810" width="80" height="25" as="geometry"/>
                 </mxCell>
-                <mxCell id="foundry-proj" value="proj-ragi" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Machine_Learning.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=7;" parent="1" vertex="1">
+                <mxCell id="foundry-proj" value="Azure AI Foundry Project" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Machine_Learning.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=7;" parent="1" vertex="1">
                     <mxGeometry x="1450" y="760" width="35" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="crawl-pipeline-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFDE7;strokeColor=#F9A825;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="90" y="845" width="550" height="115" as="geometry"/>
+                </mxCell>
+                <mxCell id="crawl-pipeline-title" value="Crawling Pipeline (Stage 1 — Logic Apps 관장, 시나리오 A 전용)" style="text;html=1;fontSize=10;fontColor=#E65100;fontStyle=1;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="105" y="850" width="400" height="18" as="geometry"/>
+                </mxCell>
+                <mxCell id="aisearch-pipeline-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;strokeWidth=2;arcSize=3;" parent="1" vertex="1">
+                    <mxGeometry x="660" y="845" width="550" height="115" as="geometry"/>
+                </mxCell>
+                <mxCell id="aisearch-pipeline-title" value="AI Search Indexing Pipeline (Stage 2 — AI Search 관장, 시나리오 B전용: Verbalize WebApi Skill)" style="text;html=1;fontSize=9;fontColor=#1565C0;fontStyle=1;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="675" y="850" width="520" height="18" as="geometry"/>
                 </mxCell>
                 <mxCell id="paas-row2-sep" value="── Public Access (PE 없음) ──" style="text;html=1;fontSize=8;fontColor=#9E9E9E;fontStyle=2;align=center;" parent="1" vertex="1">
                     <mxGeometry x="90" y="855" width="200" height="16" as="geometry"/>
                 </mxCell>
-                <mxCell id="logic-app" value="logic-crawl-ragi" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/integration/Logic_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=8;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="logic-app" value="Azure Logic Apps" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/integration/Logic_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=8;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="155" y="875" width="45" height="45" as="geometry"/>
                 </mxCell>
                 <mxCell id="logic-details" value="Consumption | MSI&#xa;매일 21:00 UTC&#xa;크롤→인덱서 트리거" style="text;html=1;fontSize=7;fontColor=#424242;align=left;" parent="1" vertex="1">
                     <mxGeometry x="215" y="880" width="120" height="35" as="geometry"/>
                 </mxCell>
                 <mxCell id="skills-func" value="Skills Function" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/compute/Function_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=8;fontStyle=1;" parent="1" vertex="1">
-                    <mxGeometry x="510" y="880" width="45" height="45" as="geometry"/>
+                    <mxGeometry x="710" y="880" width="45" height="45" as="geometry"/>
                 </mxCell>
                 <mxCell id="skills-details" value="/api/verbalize (GPT-5.4)&#xa;/api/markdown_split&#xa;Custom WebAPI Skill endpoint" style="text;html=1;fontSize=7;fontColor=#424242;align=left;" parent="1" vertex="1">
-                    <mxGeometry x="620" y="900" width="175" height="35" as="geometry"/>
+                    <mxGeometry x="810" y="898" width="175" height="35" as="geometry"/>
                 </mxCell>
                 <mxCell id="admin-user" value="관리자" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/identity/Users.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
-                    <mxGeometry x="1620" y="220" width="40" height="40" as="geometry"/>
+                    <mxGeometry x="1180" y="78" width="40" height="40" as="geometry"/>
                 </mxCell>
                 <mxCell id="lawgokr" value="law.go.kr" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/general/Globe.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;" parent="1" vertex="1">
                     <mxGeometry x="15" y="230" width="40" height="40" as="geometry"/>
@@ -244,8 +253,10 @@
                 <mxCell id="conn-pe-blob" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#AB47BC;strokeWidth=1.5;" parent="1" source="pe-blob" target="storage" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="conn-pe-search" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#AB47BC;strokeWidth=1.5;" parent="1" source="pe-search" target="ai-search" edge="1">
-                    <mxGeometry relative="1" as="geometry"/>
+                <mxCell id="conn-pe-search" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#AB47BC;strokeWidth=1.5;" parent="1" source="pe-search" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="460" y="750" as="targetPoint"/>
+                    </mxGeometry>
                 </mxCell>
                 <mxCell id="conn-pe-aisvc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#AB47BC;strokeWidth=1.5;" parent="1" source="pe-aisvc" target="ai-services" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
@@ -307,12 +318,13 @@
                         <mxPoint x="-30" as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="conn-logic-search" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#FF6F00;strokeWidth=1.5;dashed=1;dashPattern=6 3;" parent="1" source="logic-app" target="ai-search" edge="1">
+                <mxCell id="conn-logic-search" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#FF6F00;strokeWidth=1.5;dashed=1;dashPattern=6 3;" parent="1" source="logic-app" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="178" y="850"/>
                             <mxPoint x="460" y="850"/>
                         </Array>
+                        <mxPoint x="460" y="800" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
                 <mxCell id="conn-logic-search-label" value="② 인덱서 트리거 (6개 순차)" style="edgeLabel;html=1;fontSize=7;fontColor=#FF6F00;" parent="conn-logic-search" vertex="1" connectable="0">
@@ -320,13 +332,14 @@
                         <mxPoint as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="conn-search-skills" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#FF6F00;strokeWidth=1.5;" parent="1" source="ai-search" target="skills-func" edge="1">
+                <mxCell id="conn-search-skills" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#FF6F00;strokeWidth=1.5;" parent="1" target="skills-func" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="460" y="845"/>
                             <mxPoint x="500" y="845"/>
                             <mxPoint x="500" y="903"/>
                         </Array>
+                        <mxPoint x="460" y="800" as="sourcePoint"/>
                     </mxGeometry>
                 </mxCell>
                 <mxCell id="conn-search-skills-label" value="Custom WebAPI Skill" style="edgeLabel;html=1;fontSize=7;fontColor=#FF6F00;" parent="conn-search-skills" vertex="1" connectable="0">
@@ -334,12 +347,13 @@
                         <mxPoint as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="conn-spl-blob" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7B1FA2;strokeWidth=1.5;dashed=1;dashPattern=5 3;" parent="1" source="ai-search" target="storage" edge="1">
+                <mxCell id="conn-spl-blob" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7B1FA2;strokeWidth=1.5;dashed=1;dashPattern=5 3;" parent="1" target="storage" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="460" y="740"/>
                             <mxPoint x="220" y="740"/>
                         </Array>
+                        <mxPoint x="460" y="750" as="sourcePoint"/>
                     </mxGeometry>
                 </mxCell>
                 <mxCell id="conn-spl-blob-label" value="SPL (Indexer→Blob)" style="edgeLabel;html=1;fontSize=7;fontColor=#7B1FA2;" parent="conn-spl-blob" vertex="1" connectable="0">
@@ -347,21 +361,24 @@
                         <mxPoint as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="conn-spl-ai" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7B1FA2;strokeWidth=1.5;dashed=1;dashPattern=5 3;" parent="1" source="ai-search" target="ai-services" edge="1">
-                    <mxGeometry relative="1" as="geometry"/>
+                <mxCell id="conn-spl-ai" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#7B1FA2;strokeWidth=1.5;dashed=1;dashPattern=5 3;" parent="1" target="ai-services" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="485" y="775" as="sourcePoint"/>
+                    </mxGeometry>
                 </mxCell>
                 <mxCell id="conn-spl-ai-label" value="SPL (Embedding)" style="edgeLabel;html=1;fontSize=7;fontColor=#7B1FA2;" parent="conn-spl-ai" vertex="1" connectable="0">
                     <mxGeometry x="-0.3" relative="1" as="geometry">
                         <mxPoint as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="conn-spl-di" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#E65100;strokeWidth=1.5;dashed=1;dashPattern=5 3;exitX=0.4;exitY=-0.08;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="ai-search" target="doc-intel" edge="1">
+                <mxCell id="conn-spl-di" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#E65100;strokeWidth=1.5;dashed=1;dashPattern=5 3;exitX=0.4;exitY=-0.08;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" target="doc-intel" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="460" y="746"/>
                             <mxPoint x="460" y="740"/>
                             <mxPoint x="1773" y="740"/>
                         </Array>
+                        <mxPoint x="455" y="746" as="sourcePoint"/>
                     </mxGeometry>
                 </mxCell>
                 <mxCell id="conn-spl-di-label" value="SPL (DI Layout — Cross-Region)" style="edgeLabel;html=1;fontSize=7;fontColor=#E65100;" parent="conn-spl-di" vertex="1" connectable="0">
@@ -369,12 +386,13 @@
                         <mxPoint as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="conn-hub-search" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#0097A7;strokeWidth=1.5;dashed=1;dashPattern=4 2;" parent="1" source="foundry-hub" target="ai-search" edge="1">
+                <mxCell id="conn-hub-search" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#0097A7;strokeWidth=1.5;dashed=1;dashPattern=4 2;" parent="1" source="foundry-hub" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <Array as="points">
                             <mxPoint x="1400" y="850"/>
                             <mxPoint x="460" y="850"/>
                         </Array>
+                        <mxPoint x="460" y="800" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
                 <mxCell id="conn-hub-search-label" value="Outbound PE" style="edgeLabel;html=1;fontSize=7;fontColor=#0097A7;" parent="conn-hub-search" vertex="1" connectable="0">
@@ -393,10 +411,10 @@
                 <mxCell id="pipeline-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3F9FF;strokeColor=#1976D2;strokeWidth=1.5;arcSize=2;" parent="1" vertex="1">
                     <mxGeometry x="90" y="990" width="1480" height="160" as="geometry"/>
                 </mxCell>
-                <mxCell id="pipeline-title" value="인덱싱 파이프라인 — AI Search Indexer 오케스트레이션 (DI Layout: Cross-Region PE → East US 2)" style="text;html=1;fontSize=11;fontColor=#1565C0;fontStyle=1;align=left;" parent="1" vertex="1">
-                    <mxGeometry x="105" y="995" width="600" height="22" as="geometry"/>
+                <mxCell id="pipeline-title" value="인덱스링 파이프라인 — AI Search Indexer 오케스트레이션 | [A]시나리오A: DI Layout 없음 / [B][C]시나리오B: DI Layout Cross-Region PE → East US 2" style="text;html=1;fontSize=10;fontColor=#1565C0;fontStyle=1;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="105" y="995" width="1400" height="22" as="geometry"/>
                 </mxCell>
-                <mxCell id="pipe-a" value="[A] 법률 텍스트 (prec/detc/expc/admrul×4) — Blob(SPL) → DI Layout(Cross-Region EUS2) → SplitSkill → AzureOpenAIEmbedding (3072D) → Index" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#4CAF50;fontSize=8;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="pipe-a" value="[A] 법률 텍스트 (prec/detc/expc/admrul×4) — Stage1: Logic Apps(Crawl+DataIntegration) → processed-documents/ | Stage2: AI Search(Text Split → AzureOpenAIEmbedding 3072D) → 4개 인덱스  [⚠ DI Layout 없음 — JSON 텍스트 전용]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#4CAF50;fontSize=8;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="105" y="1025" width="1440" height="28" as="geometry"/>
                 </mxCell>
                 <mxCell id="pipe-b" value="[B] 멀티모달 Basic — DI Layout (Cross-Region EUS2) → Native SplitSkill (markdown mode) → Embedding → Index   ⬅ Function App 불필요" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#1976D2;fontSize=8;align=left;spacingLeft=8;" parent="1" vertex="1">
@@ -405,8 +423,8 @@
                 <mxCell id="pipe-c" value="[C] 멀티모달 Verbalized — DI Layout (EUS2) → Custom WebApiSkill (GPT-5.4 Verbalize) → Custom WebApiSkill (markdown_split) → Embedding → Index" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#FF6F00;fontSize=8;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="105" y="1095" width="1440" height="28" as="geometry"/>
                 </mxCell>
-                <mxCell id="pipe-note" value="※ DI Layout은 모든 파이프라인에서 Cross-Region PE를 통해 East US 2의 Doc Intelligence에 접근" style="text;html=1;fontSize=8;fontColor=#BF360C;fontStyle=2;align=left;" parent="1" vertex="1">
-                    <mxGeometry x="105" y="1130" width="550" height="14" as="geometry"/>
+                <mxCell id="pipe-note" value="❗ [A] 시나리오A(JSON 텍스트): DI Layout 불필요 — Text Split → Embedding만 적용 | [B][C] 시나리오B(PDF/PPTX): DI Layout Cross-Region PE를 통해 East US 2 Doc Intelligence 접근" style="text;html=1;fontSize=8;fontColor=#BF360C;fontStyle=2;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="105" y="1130" width="1300" height="14" as="geometry"/>
                 </mxCell>
                 <mxCell id="legend-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9E9E9E;arcSize=3;" parent="1" vertex="1">
                     <mxGeometry x="90" y="1170" width="1480" height="160" as="geometry"/>
@@ -450,19 +468,22 @@
                 <mxCell id="leg-traffic" value="&lt;b&gt;트래픽 흐름:&lt;/b&gt;&#xa;크롤: Logic App → Function (HTTP) → VNet(snet-func) → PE → Storage&#xa;인덱싱: AI Search → SPL → Storage/AI Svc + Cross-Region PE → DI (EUS2)&#xa;Verbalize: AI Search → Custom WebApiSkill → Skills Function → GPT-5.4&#xa;쿼리: JumpVM(snet-jump) → PE → AI Search" style="text;html=1;fontSize=8;fontColor=#424242;align=left;whiteSpace=wrap;" parent="1" vertex="1">
                     <mxGeometry x="1277.5" y="1181.5" width="995" height="5" as="geometry"/>
                 </mxCell>
-                <mxCell id="4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#E91E63;strokeWidth=1.5;entryX=1;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="admin-user" target="pip-jump">
+                <mxCell id="4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#E91E63;strokeWidth=1.5;entryX=1;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" parent="1" source="admin-user" target="pip-jump" edge="1">
                     <mxGeometry relative="1" as="geometry">
                         <mxPoint x="1620" y="240" as="sourcePoint"/>
                         <mxPoint x="900" y="250" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="5" value="RDP / Entra ID" style="edgeLabel;html=1;fontSize=7;fontColor=#C62828;" vertex="1" connectable="0" parent="4">
+                <mxCell id="5" value="RDP / Entra ID" style="edgeLabel;html=1;fontSize=7;fontColor=#C62828;" parent="4" vertex="1" connectable="0">
                     <mxGeometry x="-0.3" relative="1" as="geometry">
                         <mxPoint x="-5" y="-20" as="offset"/>
                     </mxGeometry>
                 </mxCell>
                 <mxCell id="jump-desc" value="PE 리소스 접근 전용 관리자 VM&#xa;Entra ID 로그인 (AADLoginForWindows)" style="text;html=1;fontSize=8;fontColor=#C62828;align=left;" parent="1" vertex="1">
                     <mxGeometry x="945" y="220" width="250" height="28" as="geometry"/>
+                </mxCell>
+                <mxCell id="6" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/app_services/Search_Services.svg;" vertex="1" parent="1">
+                    <mxGeometry x="426" y="750.88" width="68" height="49.120000000000005" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>

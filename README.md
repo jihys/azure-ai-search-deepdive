@@ -1,65 +1,97 @@
-# Azure RAG Indexing Lab
+# Azure AI Search Deep Dive Lab
 
-**데이터 크롤링 → AI Search Skills 인덱싱 → Azure AI Search RAG 파이프라인 Hands-on Lab**
+**Azure AI Search의 핵심 기능을 2개 실제 시나리오로 데모하는 Hands-on Lab**
 
-한국 법령 데이터를 자동 수집하고, **Azure AI Search 네이티브 Indexer + Skillset**으로 전처리·인덱싱하여 RAG 기반 검색을 수행하는 End-to-End 파이프라인입니다. 모든 Azure 리소스는 **Private Network(VNet + Private Endpoints)** 내에 구성됩니다.
+| 시나리오 | 데이터 | 파이프라인 | 인덱스 |
+|----------|------|---------|--------|
+| **A. 법령 문서** | 한국 법령 (law.go.kr 크롤링) | Logic Apps 오케스트레이션 → AI Search Native Skillset | 4개 (prec / detc / expc / admrul) |
+| **B. 멀티모달** | PDF / PPTX (수동 업로드) | AI Search Skillset 비교 (Native vs Custom+Native) | 2개 (비교용) |
+
+모든 Azure 리소스는 **Private Network (VNet + Private Endpoints)** 내에 구성됩니다.
 
 > **리전**: Sweden Central — Document Intelligence가 Korea Central 미지원이므로 Sweden Central 사용
 
-## 아키텍처
+## 시나리오 A: 법령 문서 인덱싱 파이프라인
 
 ```
-[Logic Apps - 매일 21:00 UTC]
-  Recurrence 트리거
-      │ HTTP POST
-      ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Azure Function App (EP1, Python 3.11)                       │
-│  func-crawl-ragi  — 공개 HTTP 인바운드 / VNet 아웃바운드      │
-│                                                              │
-│  1. law.go.kr 크롤링 (공개 인터넷)                            │
-│  2. Blob 업로드 (VNet → snet-func → snet-pep → Storage PE)  │
-└──────────────────────┬───────────────────────────────────────┘
-                       │ 업로드
-                       ▼
-┌──────────────────────────────────────────────────────────────┐
-│  VNet: vnet-ragi (10.0.0.0/16) — Sweden Central             │
-│  snet-pep (10.0.1.0/24) — Private Endpoint 서브넷            │
-│  snet-func (10.0.2.0/24) — Function VNet Integration 서브넷  │
-│                                                              │
-│  ┌──────────────┐   ┌──────────────────────────────────┐    │
-│  │ Storage Acct │   │ Azure AI Search (Basic)           │    │
-│  │ raw-docs     │◄──│ Indexer (매일 06:00 UTC)          │    │
-│  │ proc-docs    │   │ Skillset:                         │    │
-│  └──────────────┘   │  [1] Text Split (2000자/200자OV)  │    │
-│         │           │  [2] OpenAI Embedding (3072D)     │    │
-│  ┌──────┴───────┐   │ Index: vector+semantic             │    │
-│  │ AI Services  │◄──│                                   │    │
-│  │ gpt-5.4      │   └──────────────────────────────────┘    │
-│  │ embedding-3L │         ▲ Shared Private Links             │
-│  ├──────────────┤         │ (spl-blob, spl-ai, spl-di)      │
-│  │ Doc Intel    │─────────┘                                  │
-│  └──────────────┘   ※ DI Layout은 PDF 멀티모달 파이프라인에서 사용 │
-└──────────────────────────────────────────────────────────────┘
+╔══════════════════════════════════════════════════════════════╗
+║ Stage 1: CRAWLING + DATA INTEGRATION  (Logic Apps 관장)         ║
+║                                                              ║
+║  [Logic Apps - 매일 06:00 KST]                               ║
+║  Recurrence 트리거                                             ║
+║      │ Step 1: Crawl Function HTTP POST                         ║
+║      ▼                                                          ║
+║  law.go.kr 크롤링 → raw-documents/{source}/{date}/           ║
+║  (prec / detc / expc / admrul - 병렬)                         ║
+║      │ Step 2: Data Integration Function HTTP POST (x4 병렬) ║
+║      ▼                                                          ║
+║  메타데이터 정규화 → processed-documents/{source}/{date}/     ║
+╚═════════════════════════════════╟═══════════════════════════╝
+                                 │
+╔═════════════════════════════════▼═══════════════════════════╗
+║ Stage 2: SPLIT + EMBEDDING + INGEST  (AI Search 관장)           ║
+║                                                              ║
+║  AI Search Indexer (매일 별도 스케줄, 증분 실행)             ║
+║  ├─ [Native] Text Split Skill (2000자 / 200자 오버랩)       ║
+║  └─ [Native] AzureOpenAIEmbeddingSkill (3072D)              ║
+║                                                              ║
+║  ┌────────────────────────────────────────────────┐  ║
+║  │ 4개 인덱스 (법령 텍스트)                               │  ║
+║  │  prec-court-index       판례                          │  ║
+║  │  const-court-index      헌재결정례                    │  ║
+║  │  legis-interp-index     법제처해석례                   │  ║
+║  │  admin-appeal-index     행정심판재결례                 │  ║
+║  └────────────────────────────────────────────────┘  ║
+╚══════════════════════════════════════════════════════════════╝
          ↓
-  RAG 질의 (GPT-5.4 + Hybrid Search)
+  RAG 질의 (GPT-5.4 + Hybrid Search + Semantic Ranker)
 ```
 
-**아키텍처 다이어그램**: [docs/architecture.drawio](docs/architecture.drawio) (draw.io에서 열기)
+## 시나리오 B: 멀티모달 PDF/PPTX 인덱싱 파이프라인
+
+```
+[PDF/PPTX 수동 업로드]
+    │
+    ▼ Blob Storage: raw/pdf/{source}/
+    │
+    ├──────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                    │
+│  [Pipeline B-1: Native Only]       [Pipeline B-2: Custom+Native]  │
+│  (Skillset 비교 기준)              (Skillset 비교 실제)              │
+│                                                                    │
+│  DI Layout → Markdown              DI Layout → Markdown           │
+│  ↓                                  ↓                              │
+│  Native Text Split                 Custom WebApiSkill              │
+│  (markdown mode)                   (GPT-5.4 이미지 Verbalization)   │
+│  ↓                                  ↓                              │
+│  Embedding (3072D)                 Native Text Split               │
+│  ↓                                  ↓                              │
+│  multimodal-native-index           Embedding (3072D)              │
+│                                    ↓                              │
+│                                   multimodal-custom-index         │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+         ↓
+  검색 비교 (Native vs GPT Verbalization 음질 차이 데모)
+```
+
+**아키텍처 다이어그램**: [docs/architecture-sweden.drawio](docs/architecture-sweden.drawio), [docs/architecture-korea.drawio](docs/architecture-korea.drawio) (draw.io에서 열기)
 
 ## 배포되는 Azure 리소스
 
 | 리소스 | 리전 | SKU | 공개 접근 |
-|--------|------|-----|----------|
+|--------|------|-----|-----------|
 | Resource Group | Sweden Central | - | - |
 | Virtual Network (10.0.0.0/16) | Sweden Central | - | - |
 | Storage Account | Sweden Central | Standard LRS | **차단** |
 | Azure AI Services (gpt-5.4 + embedding) | Sweden Central | S0 | **차단** |
 | Document Intelligence | Sweden Central | S0 | **차단** |
 | Azure AI Search | Sweden Central | **Standard (S1)** | **차단** |
+| Function App (Crawl) | Sweden Central | EP1 | 인바운드 공개 |
+| Function App (Preprocess) | Sweden Central | EP1 | VNet 내부 |
+| Logic App (Standard) | Sweden Central | WS1 | - |
 | Private Endpoints × 4 | Sweden Central | - | VNet 내부만 |
 | Private DNS Zones × 4 | Global | - | VNet 연결 |
-| Shared Private Links × 2 | - | - | Search 아웃바운드 |
+| Shared Private Links × 3 | - | - | Search 아웃바운드 |
 
 > 상세 설명: [docs/infrastructure.md](docs/infrastructure.md)
 
@@ -129,47 +161,76 @@ az search shared-private-link-resource list \
 # 각 대상 리소스에서 승인 (docs/infrastructure.md §8 참조)
 ```
 
-### 4. AI Search 파이프라인 설정
+### 4. Logic Apps 워크플로우 배포
 
-Logic Apps 대신 AI Search 네이티브 Indexer + Skillset을 사용합니다.
+기본 1개의 워크플로우를 배포합니다:
+1. **crawl-preprocess-workflow** (매일 06:00 KST): 크롤링 → Data Integration (병렬 4개 소스)
+
+`crawl-workflow`, `rag-indexing-workflow`는 레거시/디버그용으로 파일만 유지하며 기본 배포 대상에서 제외됩니다.
 
 ```bash
-# Private Network 외부에서 실행 시 임시 Public Access 허용 필요
-# (또는 VPN/Bastion 경유)
+uv run python logic-apps/deploy_workflow.py
+```
 
+### 4-1. 전처리(Data Integration) 과정
+
+시나리오 A의 전처리는 Logic Apps Stage 1에서 수행되며, 역할은 아래로 제한됩니다.
+
+1. `raw-documents/{source}/{date}/` 입력 수집
+2. 메타데이터 정규화 (source/date/file_id 등)
+3. 포맷 정리 후 `processed-documents/{source}/{date}/` 저장
+
+중요: 청크 분할(Text Split)과 임베딩 생성은 전처리 단계가 아니라, Stage 2의 AI Search Skillset이 담당합니다.
+
+### 5. AI Search 파이프라인 설정
+
+**시나리오 A — 법령 텍스트 (4개 인덱스)**:
+```bash
+# Index + Skillset(Text Split + Embedding) + DataSource + Indexer 생성
 uv run python scripts/setup_ai_search_pipeline.py
 
-# 즉시 인덱싱 실행
+# 즉시 첫 인덱싱 실행 (Full Build)
 uv run python scripts/setup_ai_search_pipeline.py --run
 ```
 
-멀티모달(PDF/이미지 고려) 별도 인덱스 파이프라인은 아래 2개 스크립트로 분리합니다.
-
+**시나리오 B — 멀티모달 (2개 인덱스, 비교용)**:
 ```bash
-# (Step 1~2) raw_pdf ZIP 해제 + 파일 유형 분류 + Blob raw/{pdf|pptx|image|other}/<source>/ 업로드
-uv run python scripts/prepare_multimodal_raw_dataset.py --source st
+# PDF/PPTX를 Blob에 수동 업로드
+uv run python scripts/prepare_multimodal_raw_dataset.py --source {source}
 
-# (Step 3~4) 별도 인덱스/스킬셋/인덱서 생성 (DI Layout + page split + embedding)
-uv run python scripts/setup_ai_search_multimodal_pipeline.py --source st --run-indexer
+# Pipeline B-1: Native-only Skillset (DI Layout → Text Split → Embedding)
+# Pipeline B-2: Custom+Native Skillset (DI Layout → GPT-5.4 Verbalization → Split → Embedding)
+uv run python scripts/setup_ai_search_multimodal_pipeline.py --source {source} --run-indexer
 ```
 
-### 5. 데이터 크롤링
+### 6. 데이터 크롤링 (선택 사항)
+
+Logic App 스케줄이 아닌 수동으로 크롤링하려면:
 
 ```bash
-# 법령 데이터 수집 및 Blob 업로드
+# 법령 데이터 수집 및 Blob 업로드 (단일 실행)
 uv run python -m src.crawler.law_crawler
 ```
 
-### 6. 노트북 실행
+### 7. 노트북 실행
 
+#### 공통 준비 (시나리오 A·B 공통)
 | 순서 | 노트북 | 설명 |
 |------|--------|------|
-| 1 | `notebooks/01-infra-deployment.ipynb` | Bicep 배포 + Function App 코드 배포 + Shared PL 승인 + **AI Search 파이프라인 설정** |
-| 2 | `notebooks/02-data-crawling.ipynb` | Azure Function App 수동 트리거 + Logic App 스케줄 확인 + Blob 결과 검증 |
-| 3 | `notebooks/03-search-and-query.ipynb` | AI Search 하이브리드 검색 + **GPT-5.4 RAG** 질의응답 (**내부망 연결 Remote VM에서 실행 필수**) |
-| 4 | `notebooks/04-legal-multi-index.ipynb` | 법률 데이터 4종 멀티 인덱스 구축 |
+| 1 | `notebooks/01-infra-deployment.ipynb` | Bicep 배포 + Function 코드 배포 + Shared PL 승인 + Logic Apps 워크플로우 배포 |
+
+#### 시나리오 A: 법령 문서 인덱싱
+| 순서 | 노트북 | 설명 |
+|------|--------|------|
+| 2 | `notebooks/02-data-crawling.ipynb` | Logic App 트리거 + AI Search 인덱서 모니터링 + Blob 결과 검증 |
+| 3 | `notebooks/03-indexing.ipynb` | 인덱싱 샘플 실행 및 필요 시 전체 인덱스 삭제 후 인덱서 재실행 |
+| 4 | `notebooks/04-search-and-query.ipynb` | AI Search 하이브리드 검색 + GPT-5.4 RAG 질의응답 |
 | 5 | `notebooks/05-multi-index-search.ipynb` | 멀티 인덱스 통합 검색 및 Cross-Index RAG |
-| 6 | `notebooks/06-multimodal-search.ipynb` | 멀티모달 검색 (이미지 + 텍스트) |
+
+#### 시나리오 B: 멀티모달 PDF/PPTX 인덱싱
+| 순서 | 노트북 | 설명 |
+|------|--------|------|
+| 6 | `notebooks/06-multimodal-search.ipynb` | PDF 업로드 → Native vs Custom+Native Skillset 비교 → 멀티모달 검색 데모 |
 
 ## 프로젝트 구조
 
@@ -205,9 +266,18 @@ azure-rag-indexing-lab/
 │   ├── prepare_multimodal_raw_dataset.py       # raw_pdf ZIP 해제/분류/업로드
 │   └── setup_ai_search_multimodal_pipeline.py  # 별도 멀티모달 인덱스 파이프라인 설정
 │
+├── logic-apps/
+│   ├── deploy_workflow.py                      # Logic Apps 워크플로우 배포 스크립트
+│   ├── crawl-function/                         # Crawl Function 코드
+│   ├── preprocess-function/                    # Data Integration Function 코드
+│   ├── crawl-preprocess-workflow/              # 운영 워크플로우 (기본)
+│   ├── crawl-workflow/                         # 레거시/디버그용
+│   └── rag-indexing-workflow/                  # 레거시/디버그용
+│
 ├── docs/
 │   ├── infrastructure.md            # 인프라 상세 설명  [NEW]
-│   └── architecture.drawio          # 아키텍처 다이어그램 (draw.io)  [NEW]
+│   ├── architecture-sweden.drawio   # Sweden 아키텍처 다이어그램
+│   └── architecture-korea.drawio    # Korea 아키텍처 다이어그램
 │
 ├── src/                             # Python 소스 코드
 │   ├── crawler/law_crawler.py       # 법령 크롤러 (law.go.kr)
@@ -218,8 +288,10 @@ azure-rag-indexing-lab/
 ├── notebooks/                       # Step-by-Step 노트북
 │   ├── 01-infra-deployment.ipynb
 │   ├── 02-data-crawling.ipynb
-│   ├── 03-logic-apps-setup.ipynb    # → AI Search Skills 설정으로 변경
-│   └── 04-search-and-query.ipynb
+│   ├── 03-indexing.ipynb
+│   ├── 04-search-and-query.ipynb
+│   ├── 05-multi-index-search.ipynb
+│   └── 06-multimodal-search.ipynb
 │
 └── data/
     ├── raw/                         # 크롤링 원본 (날짜별)
@@ -237,10 +309,10 @@ azure-rag-indexing-lab/
 | 인덱싱 파이프라인 | Logic Apps Consumption | **AI Search Skills** (Indexer + Skillset) |
 | 인프라 모듈 | storage, openai, ai-search, doc-intel, logic-app | + vnet, private-endpoints |
 
-**Logic Apps 제거 이유:**
-1. Consumption Plan은 VNet integration 미지원 → Private Network 불가
-2. AI Search 네이티브 Skillset으로 동일 파이프라인을 선언형으로 구성 가능
-3. Python 크롤러가 이미 크롤 기능을 담당하므로 Logic Apps 크롤 워크플로우도 불필요
+**Logic Apps 운영 정책:**
+1. 기본 운영 워크플로우는 `crawl-preprocess-workflow` 1개
+2. `crawl-workflow`, `rag-indexing-workflow`는 레거시/디버그용으로 저장소에만 유지
+3. Split/Embedding/Ingest는 AI Search 네이티브 Skillset이 담당
 
 ## Private Network 접근 방법
 

@@ -2,19 +2,18 @@
 Logic Apps 워크플로우 배포 스크립트
 Kudu REST API를 통해 Logic App Standard에 워크플로우를 배포합니다.
 
-워크플로우 구성:
-  - rag-indexing-workflow: Blob 트리거 → DI → Chunking → Embedding → AI Search
-  - crawl-workflow: 일별 스케줄 → law.go.kr 크롤링 → Blob 업로드 (→ 자동 트리거)
+워크플로우:
+  - crawl-preprocess-workflow: 일별 크롤링 → 전처리 (병렬 4개 소스)
+
+참고:
+    - crawl-workflow, rag-indexing-workflow는 레거시/디버그용으로 저장소에만 유지하며 기본 배포에서 제외
 """
 
-import json
 import os
 import sys
 
 import requests
 from azure.identity import DefaultAzureCredential
-from azure.mgmt.web import WebSiteManagementClient
-from azure.mgmt.web.models import StringDictionary
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,25 +31,16 @@ def deploy_workflow():
         sys.exit(1)
 
     credential = DefaultAzureCredential()
-    web_client = WebSiteManagementClient(credential, subscription_id)
 
-    # 1. App Settings 업데이트 (Bicep에서 설정한 것과 병합)
-    print("[배포] Logic App 앱 설정 확인 중...")
-    existing = web_client.web_apps.list_application_settings(resource_group, logic_app_name)
-    print(f"  기존 앱 설정 {len(existing.properties)}개 확인")
-
-    # 2. Kudu API를 통해 워크플로우 파일 배포
+    # Kudu API를 통해 워크플로우 파일 배포
     print("[배포] 워크플로우 파일 배포 중...")
 
     logic_apps_dir = os.path.dirname(__file__)
     files_to_deploy = {
         "host.json": os.path.join(logic_apps_dir, "host.json"),
         "connections.json": os.path.join(logic_apps_dir, "connections.json"),
-        "rag-indexing-workflow/workflow.json": os.path.join(
-            logic_apps_dir, "rag-indexing-workflow", "workflow.json"
-        ),
-        "crawl-workflow/workflow.json": os.path.join(
-            logic_apps_dir, "crawl-workflow", "workflow.json"
+        "crawl-preprocess-workflow/workflow.json": os.path.join(
+            logic_apps_dir, "crawl-preprocess-workflow", "workflow.json"
         ),
     }
 
