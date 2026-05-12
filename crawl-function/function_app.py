@@ -181,78 +181,33 @@ def _process_source(
     max_pages: int | None,
     detail_workers: int,
 ) -> dict:
-    """단일 소스 처리: 기존 blob 조회 → 크롤링 (기존 제외) → 업로드"""
+    """단일 소스 처리: 기존 blob 조회 → 건별 크롤링+즉시 업로드 (스트리밍)"""
     CrawlerClass, _ = _CRAWLERS[target]
     crawler = CrawlerClass()
 
     existing_seqs = _get_existing_seqs(blob_client, target)
 
-    docs, crawl_attempts = _crawl_with_retry(
-        crawler=crawler,
-        source=target,
-        max_pages=max_pages,
-        retry_count=CRAWL_RETRY_COUNT,
-        sleep_seconds=RETRY_SLEEP_SECONDS,
-        skip_seqs=existing_seqs,
-        detail_workers=detail_workers,
-    )
-
-    saved, skipped_existing, upload_failed = _upload_docs(
-        blob_client=blob_client,
-        docs=docs,
-        source=target,
-        date_folder=date_folder,
-        retry_count=UPLOAD_RETRY_COUNT,
-        sleep_seconds=RETRY_SLEEP_SECONDS,
-    )
-
-    logging.info(
-        f"[{target}] {len(docs)}건 수집, {len(saved)}건 저장, "
-        f"기존blob {len(existing_seqs)}건 제외, "
-        f"당일중복 {skipped_existing}건, 업로드실패 {upload_failed}건"
-    )
-
-    return {
-        "saved": saved,
-        "skipped_existing": skipped_existing,
-        "upload_failed": upload_failed,
-        "crawl_attempts": crawl_attempts,
-        "doc_count": len(docs),
-        "pre_existing": len(existing_seqs),
-    }
-
-
-def _upload_docs(
-    blob_client: BlobServiceClient | None,
-    docs: list[dict],
-    source: str,
-    date_folder: str,
-    retry_count: int,
-    sleep_seconds: float,
-) -> tuple[list[str], int, int]:
-    """Upload docs with retry and skip documents that already exist in blob."""
-    if not blob_client or not docs:
-        return [], 0, 0
-
-    container = blob_client.get_container_client(BLOB_CONTAINER_NAME)
-    # source-first 경로: {source}/{date}/ → AI Search Datasource prefix 필터 지원
-    prefix = f"{source}/{date_folder}/"
-    existing = {b.name for b in container.list_blobs(name_starts_with=prefix)}
+    # Blob 컨테이너·설정 준비 (건별 업로드용)
+    container = None
+    settings = ContentSettings(content_type="application/json", content_encoding="utf-8")
+    if blob_client:
+        container = blob_client.get_container_client(BLOB_CONTAINER_NAME)
 
     saved = []
-    skipped_existing = 0
     upload_failed = 0
-    settings = ContentSettings(content_type="application/json", content_encoding="utf-8")
+    doc_count = 0
 
-    for doc in docs:
+    def _on_doc(doc: dict) -> None:
+        """상세 페이지 1건 크롤링 완료 시 즉시 Blob 업로드"""
+        nonlocal upload_failed, doc_count
+        doc_count += 1
+        if not container:
+            return
         seq = doc.get("seq", doc.get("id", "unknown"))
-        blob_name = f"{source}/{date_folder}/{source}_{seq}.json"
-        if blob_name in existing:
-            skipped_existing += 1
-            continue
+        blob_name = f"{target}/{date_folder}/{target}_{seq}.json"
 
         last_error = None
-        for attempt in range(1, retry_count + 2):
+        for attempt in range(1, UPLOAD_RETRY_COUNT + 2):
             try:
                 container.upload_blob(
                     name=blob_name,
@@ -261,51 +216,40 @@ def _upload_docs(
                     content_settings=settings,
                 )
                 saved.append(blob_name)
-                existing.add(blob_name)
                 last_error = None
                 break
             except Exception as e:
                 last_error = e
-                if attempt <= retry_count:
-                    logging.warning(
-                        f"Blob 업로드 재시도 {attempt}/{retry_count} ({blob_name}): {e}"
-                    )
-                    time.sleep(sleep_seconds)
-
+                if attempt <= UPLOAD_RETRY_COUNT:
+                    time.sleep(RETRY_SLEEP_SECONDS)
         if last_error is not None:
             upload_failed += 1
-            logging.error(f"Blob 업로드 최종 실패 ({blob_name}): {last_error}")
+            logging.error(f"Blob 업로드 실패 ({blob_name}): {last_error}")
 
-    return saved, skipped_existing, upload_failed
+    # 크롤링 실행 — 건별 콜백으로 즉시 업로드
+    crawl_attempts = 1
+    try:
+        crawler.crawl_all(
+            query="*", max_pages=max_pages,
+            skip_seqs=existing_seqs, max_workers=detail_workers,
+            on_doc=_on_doc,
+        )
+    except Exception as e:
+        logging.error(f"[{target}] 크롤링 실패: {e}")
+
+    logging.info(
+        f"[{target}] {doc_count}건 수집, {len(saved)}건 저장, "
+        f"기존blob {len(existing_seqs)}건 제외, 업로드실패 {upload_failed}건"
+    )
+
+    return {
+        "saved": saved,
+        "skipped_existing": 0,
+        "upload_failed": upload_failed,
+        "crawl_attempts": crawl_attempts,
+        "doc_count": doc_count,
+        "pre_existing": len(existing_seqs),
+    }
 
 
-def _crawl_with_retry(
-    crawler,
-    source: str,
-    max_pages: int | None,
-    retry_count: int,
-    sleep_seconds: float,
-    skip_seqs: set[str] | None = None,
-    detail_workers: int = 1,
-) -> tuple[list[dict], int]:
-    """Run crawler with source-level retry. Returns docs and attempts used."""
-    last_error = None
-    docs: list[dict] = []
 
-    for attempt in range(1, retry_count + 2):
-        try:
-            docs = crawler.crawl_all(
-                query="*", max_pages=max_pages,
-                skip_seqs=skip_seqs, max_workers=detail_workers,
-            )
-            return docs, attempt
-        except Exception as e:
-            last_error = e
-            if attempt <= retry_count:
-                logging.warning(
-                    f"[{source}] 크롤링 재시도 {attempt}/{retry_count}: {e}"
-                )
-                time.sleep(sleep_seconds)
-
-    logging.error(f"[{source}] 크롤링 최종 실패: {last_error}")
-    return docs, retry_count + 1

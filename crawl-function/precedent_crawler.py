@@ -207,8 +207,9 @@ class _BaseWebCrawler:
         delay_detail: float | None = None,
         skip_seqs: set[str] | None = None,
         max_workers: int = 1,
+        on_doc: callable = None,
     ) -> list[dict]:
-        """목록 순회 + 상세 수집 (skip_seqs로 기존 건 제외, max_workers로 병렬 수집)"""
+        """목록 순회 + 상세 수집 (skip_seqs로 기존 건 제외, on_doc으로 건별 즉시 처리)"""
         delay = delay_detail if delay_detail is not None else self.delay_detail
         skip = skip_seqs or set()
 
@@ -230,7 +231,7 @@ class _BaseWebCrawler:
         if not items_to_fetch:
             return []
 
-        # 2단계: 상세 수집 (병렬 지원)
+        # 2단계: 상세 수집 (병렬 지원) + 건별 즉시 콜백
         results: list[dict] = []
         if max_workers <= 1:
             for item in items_to_fetch:
@@ -238,6 +239,8 @@ class _BaseWebCrawler:
                 doc = self.get_detail(seq)
                 if doc:
                     results.append(doc)
+                    if on_doc:
+                        on_doc(doc)
                 time.sleep(delay)
         else:
             def _fetch(seq: str) -> dict | None:
@@ -266,6 +269,8 @@ class _BaseWebCrawler:
                         doc = future.result()
                         if doc:
                             results.append(doc)
+                            if on_doc:
+                                on_doc(doc)
                     except Exception as e:
                         logger.warning("[%s] 상세 수집 예외: %s", self.SOURCE_NAME, e)
 
