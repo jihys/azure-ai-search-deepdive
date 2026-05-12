@@ -11,8 +11,8 @@
 @description('배포 리전')
 param location string
 
-@description('JumpVM 서브넷 ID (snet-jumpvm)')
-param jumpvmSubnetId string
+@description('JumpVM 서브넷 ID (snet-jump, 10.0.0.0/24)')
+param jumpSubnetId string
 
 @description('VM 관리자 계정명')
 param adminUsername string
@@ -96,7 +96,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2024-01-01' = {
       {
         name: 'ipconfig1'
         properties: {
-          subnet: { id: jumpvmSubnetId }
+          subnet: { id: jumpSubnetId }
           privateIPAllocationMethod: 'Dynamic'
           publicIPAddress: { id: publicIp.id }
         }
@@ -131,7 +131,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
       }
     }
     osProfile: {
-      computerName: 'jumpvm'
+      computerName: 'jumpvmkrc2'
       adminUsername: adminUsername
       adminPassword: adminPassword
       windowsConfiguration: {
@@ -170,10 +170,10 @@ resource aadLoginExtension 'Microsoft.Compute/virtualMachines/extensions@2024-03
 // ── VM Extension: 개발 도구 자동 설치 (Chocolatey) ──
 // 설치 항목:
 // 1) Visual Studio Code
-// 2) Git
+// 2) Git (Git Bash 포함)
 // 3) Git CLI (GitHub CLI: gh)
 // 4) Azure CLI
-// 5) Git Bash (Git 설치에 포함)
+// 5) Python 3.x
 resource devToolsExtension 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' = {
   parent: vm
   name: 'InstallDevTools'
@@ -184,7 +184,7 @@ resource devToolsExtension 'Microsoft.Compute/virtualMachines/extensions@2024-03
     typeHandlerVersion: '1.10'
     autoUpgradeMinorVersion: true
     protectedSettings: {
-      commandToExecute: 'powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; if (-not (Get-Command choco -ErrorAction SilentlyContinue)) { Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 3072; iwr https://community.chocolatey.org/install.ps1 -UseBasicParsing | iex }; choco feature enable -n=allowGlobalConfirmation; choco install -y vscode git git.install gh azure-cli"'
+      commandToExecute: 'powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; if (-not (Get-Command choco -ErrorAction SilentlyContinue)) { Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 3072; iwr https://community.chocolatey.org/install.ps1 -UseBasicParsing | iex }; choco feature enable -n=allowGlobalConfirmation; choco install -y vscode git git.install gh azure-cli python3"'
     }
   }
   dependsOn: [

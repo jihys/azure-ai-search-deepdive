@@ -1,18 +1,23 @@
 // ============================================
-// Azure RAG Indexing Lab - Main Bicep Template
-// Region: Sweden Central (swedencentral)
+// Azure RAG Indexing Lab - Korea Central Version
+// Primary: Korea Central (koreacentral)
+// Doc Intelligence: East US 2 (eastus2) — 한국 리전 미지원
 // Network: Full Private (VNet + Private Endpoints)
-// Pipeline: AI Search Native Indexer + Skillset
-//           (Logic Apps 대신 AI Search Skills 사용)
 // ============================================
 
 targetScope = 'subscription'
 
-@description('리소스 그룹 이름')
-param resourceGroupName string = 'rg-rag-indexing-lab-swc'
+@description('메인 리소스 그룹 이름 (Korea Central)')
+param resourceGroupName string = 'rg-rag-indexing-lab-krc'
 
-@description('배포 리전 - Sweden Central (Document Intelligence 지원)')
-param location string = 'swedencentral'
+@description('Doc Intelligence 리소스 그룹 (East US 2)')
+param docIntelResourceGroupName string = 'rg-rag-indexing-lab-eus2'
+
+@description('메인 배포 리전 - Korea Central')
+param location string = 'koreacentral'
+
+@description('Doc Intelligence 배포 리전 - East US 2 (한국 미지원)')
+param docIntelLocation string = 'eastus2'
 
 @description('리소스 이름 접미사 (고유성 보장)')
 param suffix string = uniqueString(subscription().subscriptionId, resourceGroupName)
@@ -20,15 +25,18 @@ param suffix string = uniqueString(subscription().subscriptionId, resourceGroupN
 @description('Azure OpenAI embedding 모델 배포명')
 param embeddingDeploymentName string = 'text-embedding-3-large'
 
-@description('Azure OpenAI GPT-5.4 배포명 (RAG 질의응답용)')
-param gpt54DeploymentName string = 'gpt-5.4'
+@description('Azure OpenAI GPT-5.4 모델 배포명')
+param gptDeploymentName string = 'gpt-5.4'
 
-@description('GPT-5.4 모델 버전 — Azure Portal에서 확인 후 입력')
-param gpt54ModelVersion string
+@description('GPT 모델 버전')
+param gptModelVersion string
+
+@description('GPT 모델 이름 (GlobalStandard)')
+param gptModelName string = 'gpt-5.4'
 
 @description('AI Search SKU')
 @allowed(['basic', 'standard', 'standard2'])
-param searchSku string = 'basic'
+param searchSku string = 'standard'
 
 @description('Storage Account 컨테이너 이름')
 param blobContainerName string = 'raw-documents'
@@ -47,23 +55,36 @@ param jumpvmAdminPassword string
 param jumpvmEntraUserObjectIds array = []
 
 // ============================================
-// Resource Group
+// Resource Groups
 // ============================================
-resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
+resource rgKorea 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: resourceGroupName
   location: location
   tags: {
     project: 'rag-indexing-lab'
     environment: 'lab'
-    region: 'swedencentral'
+    region: 'koreacentral'
+    version: 'v2'
+  }
+}
+
+resource rgDocIntel 'Microsoft.Resources/resourceGroups@2024-03-01' = {
+  name: docIntelResourceGroupName
+  location: docIntelLocation
+  tags: {
+    project: 'rag-indexing-lab'
+    environment: 'lab'
+    region: 'eastus2'
+    purpose: 'doc-intelligence-only'
+    version: 'v2'
   }
 }
 
 // ============================================
-// Virtual Network + Private DNS Zones
+// Virtual Network + Private DNS Zones (Korea Central)
 // ============================================
 module vnet 'modules/vnet.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'vnet-deployment'
   params: {
     location: location
@@ -72,52 +93,53 @@ module vnet 'modules/vnet.bicep' = {
 }
 
 // ============================================
-// Storage Account (Private)
+// Storage Account (Korea Central, Private)
 // ============================================
 module storage 'modules/storage.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'storage-deployment'
   params: {
     location: location
     suffix: suffix
     containerName: blobContainerName
+    userObjectIds: jumpvmEntraUserObjectIds
   }
 }
 
 // ============================================
-// Azure AI Services (OpenAI) (Private)
+// Azure AI Services (Korea Central, Private)
 // ============================================
 module openai 'modules/openai.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'openai-deployment'
   params: {
     location: location
     suffix: suffix
     embeddingDeploymentName: embeddingDeploymentName
-    gpt54DeploymentName: gpt54DeploymentName
-    gpt54ModelVersion: gpt54ModelVersion
+    gptDeploymentName: gptDeploymentName
+    gptModelName: gptModelName
+    gptModelVersion: gptModelVersion
   }
 }
 
 // ============================================
-// Document Intelligence (Private)
+// Document Intelligence (East US 2, Private)
+// ※ 한국 리전 미지원 → Cross-Region PE로 접근
 // ============================================
 module docIntelligence 'modules/doc-intelligence.bicep' = {
-  scope: rg
+  scope: rgDocIntel
   name: 'doc-intelligence-deployment'
   params: {
-    location: location
+    location: docIntelLocation
     suffix: suffix
   }
 }
 
 // ============================================
-// Azure AI Search + Shared Private Links (아웃바운드)
-// AI Search Indexer + Skillset이 Storage/AI Services에 접근
-// Logic Apps 인덱싱 워크플로우를 AI Search 네이티브로 대체
+// Azure AI Search + Shared Private Links
 // ============================================
 module aiSearch 'modules/ai-search.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'ai-search-deployment'
   params: {
     location: location
@@ -130,11 +152,9 @@ module aiSearch 'modules/ai-search.bicep' = {
 
 // ============================================
 // Azure Function App (크롤러) - EP1 + VNet Integration
-// Python 크롤러를 Azure에서 실행 (로컬 실행 대체)
-// snet-func → VNet → Storage PE로 아웃바운드 접근
 // ============================================
 module functionCrawler 'modules/function-crawler.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'function-crawler-deployment'
   params: {
     location: location
@@ -149,10 +169,9 @@ module functionCrawler 'modules/function-crawler.bicep' = {
 
 // ============================================
 // Logic App (Consumption) - 크롤 스케줄러
-// 매일 21:00 UTC (= 06:00 KST) → Function 호출
 // ============================================
 module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'logic-app-crawl-deployment'
   params: {
     location: location
@@ -163,12 +182,10 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
 }
 
 // ============================================
-// Azure AI Foundry Hub + Project (Private AI Search 연결)
-// Managed Network: AllowInternetOutbound
-// Outbound PE: AI Search + AI Services
+// Azure AI Foundry Hub + Project
 // ============================================
 module foundryHub 'modules/foundry-hub.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'foundry-hub-deployment'
   params: {
     location: location
@@ -185,10 +202,11 @@ module foundryHub 'modules/foundry-hub.bicep' = {
 }
 
 // ============================================
-// Private Endpoints (인바운드 - VNet 내부 접근)
+// Private Endpoints (Korea Central VNet)
+// ※ Doc Intelligence PE는 Cross-Region (Korea→EUS2)
 // ============================================
 module privateEndpoints 'modules/private-endpoints.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'private-endpoints-deployment'
   params: {
     location: location
@@ -211,16 +229,14 @@ module privateEndpoints 'modules/private-endpoints.bicep' = {
 }
 
 // ============================================
-// JumpVM - AI Search / Private Endpoint 접근용 관리 VM
-// publicNetworkAccess=Disabled 서비스에 VNet 내부에서만 접근
-// snet-jump (10.0.3.0/24) → snet-pep → Private Endpoint → Service
+// JumpVM (Korea Central)
 // ============================================
 module jumpvm 'modules/jumpvm.bicep' = {
-  scope: rg
+  scope: rgKorea
   name: 'jumpvm-deployment'
   params: {
     location: location
-    jumpvmSubnetId: vnet.outputs.jumpvmSubnetId
+    jumpSubnetId: vnet.outputs.jumpSubnetId
     adminUsername: jumpvmAdminUsername
     adminPassword: jumpvmAdminPassword
     entraUserObjectIds: jumpvmEntraUserObjectIds
@@ -230,14 +246,16 @@ module jumpvm 'modules/jumpvm.bicep' = {
 // ============================================
 // Outputs
 // ============================================
-output resourceGroupName string = rg.name
+output resourceGroupName string = rgKorea.name
+output docIntelResourceGroupName string = rgDocIntel.name
 output location string = location
+output docIntelLocation string = docIntelLocation
 output vnetName string = vnet.outputs.vnetName
 output storageAccountName string = storage.outputs.storageAccountName
 output storageAccountBlobEndpoint string = storage.outputs.blobEndpoint
 output openaiEndpoint string = openai.outputs.endpoint
 output openaiAccountName string = openai.outputs.accountName
-output gpt54DeploymentName string = openai.outputs.gpt54DeploymentName
+output gptDeploymentName string = openai.outputs.gptDeploymentName
 output aiSearchEndpoint string = aiSearch.outputs.endpoint
 output aiSearchName string = aiSearch.outputs.searchServiceName
 output docIntelligenceEndpoint string = docIntelligence.outputs.endpoint

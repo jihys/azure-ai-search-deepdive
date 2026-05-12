@@ -39,19 +39,6 @@ var hubName = 'hub-ragi-${take(suffix, 8)}'
 var projectName = 'proj-ragi-${take(suffix, 8)}'
 var keyVaultName = 'kv-ragi-${take(suffix, 8)}'
 
-// ── existing resources (RBAC scoping 용) ──
-resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
-  name: searchServiceName
-}
-
-resource aiServices 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
-  name: aiServicesName
-}
-
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: storageAccountName
-}
-
 // ── Key Vault (Hub 필수 종속성) ──
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
@@ -149,75 +136,16 @@ resource aiServicesConnection 'Microsoft.MachineLearningServices/workspaces/conn
   }
 }
 
-// ── RBAC: Hub MI → AI Search (Search Index Data Contributor) ──
-resource hubSearchDataContrib 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(hub.id, searchService.id, '8ebe5a00-799e-43f5-93ac-243d3dce84a7')
-  scope: searchService
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
-    )
-    principalId: hub.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// ── RBAC: Hub MI → AI Search (Search Service Contributor) ──
-resource hubSearchContrib 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(hub.id, searchService.id, '7ca78c08-252a-4471-8644-bb5ff32d4ba0')
-  scope: searchService
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
-    )
-    principalId: hub.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// ── RBAC: Hub MI → AI Services (Cognitive Services OpenAI User) ──
-resource hubAiServicesRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(hub.id, aiServices.id, '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
-  scope: aiServices
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
-    )
-    principalId: hub.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// ── RBAC: Hub MI → Storage (Storage Blob Data Contributor) ──
-resource hubStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(hub.id, storageAccount.id, 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
-  scope: storageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
-    )
-    principalId: hub.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// ── RBAC: Hub MI → Key Vault (Key Vault Administrator) ──
-resource hubKvRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(hub.id, keyVault.id, '00482a5a-887f-4fb3-b363-3b7fe8e74483')
-  scope: keyVault
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      '00482a5a-887f-4fb3-b363-3b7fe8e74483'
-    )
-    principalId: hub.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// ── RBAC ──
+// Hub/Foundry 플랫폼이 자동으로 필요한 RBAC를 생성함:
+//   - Search Index Data Contributor (AI Search)
+//   - Search Service Contributor (AI Search)
+//   - Cognitive Services OpenAI User (AI Services)
+//   - Storage Blob Data Contributor (Storage)
+//   - Storage File Data Privileged Contributor (Storage)
+//   - Key Vault Administrator (Key Vault)
+//   - Azure AI Administrator (RG)
+// 따라서 명시적 RBAC 정의를 제거하여 재배포 시 충돌 방지
 
 // ── Outputs ──
 output hubId string = hub.id

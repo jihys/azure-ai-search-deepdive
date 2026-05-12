@@ -38,3 +38,4 @@ data/processed/*
 uv.lock
 data/raw_pdf/
 data/*.jsonl
+func-crawl.zip

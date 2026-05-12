@@ -35,22 +35,34 @@ az group create --name rg-rag-indexing-lab --location koreacentral
 # 2. Bicep 배포
 az deployment group create \
   --resource-group rg-rag-indexing-lab \
-  --template-file infra/main.bicep \
-  --parameters infra/parameters/main.bicepparam
+  --template-file infra/sweden/main.bicep \
+  --parameters infra/sweden/parameters/main.bicepparam
 ```
 
 ### 파일 구조
 ```
 infra/
-├── main.bicep                    # 메인 오케스트레이션
-├── modules/
-│   ├── storage.bicep             # Storage Account + Blob Container
-│   ├── openai.bicep              # Azure OpenAI + Embedding 모델 배포
-│   ├── ai-search.bicep           # Azure AI Search 서비스
-│   ├── doc-intelligence.bicep    # Document Intelligence
-│   └── logic-app.bicep           # Logic App (Workflow Service Plan)
-└── parameters/
-    └── main.bicepparam           # 파라미터 파일
+├── sweden/                       # Sweden Central 배포
+│   ├── main.bicep                # 메인 오케스트레이션
+│   ├── modules/
+│   │   ├── storage.bicep         # Storage Account + Blob Container
+│   │   ├── openai.bicep          # Azure OpenAI + Embedding 모델 배포
+│   │   ├── ai-search.bicep       # Azure AI Search 서비스
+│   │   ├── doc-intelligence.bicep # Document Intelligence
+│   │   └── ...                   # 기타 모듈
+│   └── parameters/
+│       └── main.bicepparam       # Sweden Central 파라미터
+│
+└── korea/                        # Korea Central 배포
+    ├── main.bicep                # 메인 (Korea Central + East US 2 DI)
+    ├── modules/
+    │   ├── storage.bicep         # Storage Account + Blob Container
+    │   ├── openai.bicep          # Azure OpenAI + Embedding 모델 배포
+    │   ├── ai-search.bicep       # Azure AI Search 서비스
+    │   ├── doc-intelligence.bicep # Document Intelligence (East US 2)
+    │   └── ...                   # 기타 모듈
+    └── parameters/
+        └── main.bicepparam       # Korea Central 파라미터
 ```
 
 ---
@@ -107,7 +119,7 @@ src/
    b. Document Intelligence: 
       - Layout 분석 (Markdown layer)
       - 테이블 추출
-      - 이미지 추출 + Verbalization (OpenAI GPT-4o)
+      - 이미지 추출 + Verbalization (OpenAI GPT-5.4)
    c. Chunking: 텍스트를 적절한 크기로 분할
    d. OpenAI Embedding: text-embedding-3-large로 벡터화
    e. Index to AI Search: 청크 + 벡터를 인덱스에 저장

@@ -4,14 +4,17 @@ Azure Functions Python v2 프로그래밍 모델
 
 HTTP 트리거: Logic Apps / 수동 POST 호출
   Body (JSON):
-    source       : "prec" | "detc" | "expc" | "admrul" | "all"  (기본: "all")
-    max_pages    : 크롤링 페이지 수 (기본: 1, 페이지당 최대 100건)
-    triggered_by : 호출 출처 (기본: "manual")
+    source         : "prec" | "detc" | "expc" | "admrul" | "all"  (기본: "all")
+    max_pages      : 크롤링 페이지 수 (기본: 0 = 무제한, 페이지당 100건)
+    detail_workers : 상세 크롤링 병렬 스레드 수 (기본: 5)
+    triggered_by   : 호출 출처 (기본: "manual")
 
 처리 흐름:
-  law.go.kr 웹 스크래핑 (판례·헌재·법제처·행정심판)
-  → Blob Storage raw-documents/{date}/{source}/{seq}.json 저장
-  → 결과 JSON 반환
+  1. Blob Storage에서 기존 seq ID 조회 (중복 크롤링 방지)
+  2. law.go.kr 웹 스크래핑 (판례·헌재·법제처·행정심판, 4소스 병렬)
+  3. 상세 페이지 병렬 수집 (detail_workers 스레드)
+  4. Blob Storage raw-documents/{source}/{date}/{seq}.json 저장
+  5. 결과 JSON 반환
 
 Storage 접근:
   - Managed Identity 기반 (VNet Integration → Storage Private Endpoint)
@@ -26,6 +29,7 @@ from datetime import datetime, timezone
 import azure.functions as func
 from azure.identity import ManagedIdentityCredential
 from azure.storage.blob import BlobServiceClient, ContentSettings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from precedent_crawler import (
     LawPrecedentCrawler,
@@ -38,7 +42,8 @@ app = func.FunctionApp()
 
 STORAGE_ACCOUNT_NAME = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME", "")
 BLOB_CONTAINER_NAME = os.environ.get("AZURE_BLOB_CONTAINER_NAME", "raw-documents")
-DEFAULT_MAX_PAGES = int(os.environ.get("CRAWLER_MAX_PAGES", "1"))
+DEFAULT_MAX_PAGES = int(os.environ.get("CRAWLER_MAX_PAGES", "0"))  # 0 = 무제한
+CRAWL_DETAIL_WORKERS = int(os.environ.get("CRAWL_DETAIL_WORKERS", "5"))
 CRAWL_RETRY_COUNT = int(os.environ.get("CRAWLER_RETRY_COUNT", "2"))
 UPLOAD_RETRY_COUNT = int(os.environ.get("UPLOAD_RETRY_COUNT", "2"))
 RETRY_SLEEP_SECONDS = float(os.environ.get("RETRY_SLEEP_SECONDS", "1.0"))
@@ -73,45 +78,46 @@ def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400, mimetype="application/json",
         )
 
-    logging.info(f"Crawl start: source={source}, max_pages={max_pages}, triggered_by={triggered_by}")
+    max_pages_val = max_pages if max_pages > 0 else None
+    detail_workers = int(body.get("detail_workers", CRAWL_DETAIL_WORKERS))
+
+    logging.info(
+        f"Crawl start: source={source}, max_pages={max_pages_val}, "
+        f"detail_workers={detail_workers}, triggered_by={triggered_by}"
+    )
 
     date_folder = start.strftime("%Y-%m-%d")
     total_saved = []
     total_skipped_existing = 0
     total_upload_failed = 0
+    total_pre_existing = 0
     retried_sources = {}
     counts = {}
 
     blob_client = _make_blob_client()
 
-    for target in targets:
-        CrawlerClass, _ = _CRAWLERS[target]
-        crawler = CrawlerClass()
-        docs, crawl_attempts = _crawl_with_retry(
-            crawler=crawler,
-            source=target,
-            max_pages=max_pages,
-            retry_count=CRAWL_RETRY_COUNT,
-            sleep_seconds=RETRY_SLEEP_SECONDS,
-        )
-
-        saved, skipped_existing, upload_failed = _upload_docs(
-            blob_client=blob_client,
-            docs=docs,
-            source=target,
-            date_folder=date_folder,
-            retry_count=UPLOAD_RETRY_COUNT,
-            sleep_seconds=RETRY_SLEEP_SECONDS,
-        )
-        total_saved.extend(saved)
-        total_skipped_existing += skipped_existing
-        total_upload_failed += upload_failed
-        retried_sources[target] = max(crawl_attempts - 1, 0)
-        counts[target] = len(docs)
-        logging.info(
-            f"[{target}] {len(docs)}건 수집, {len(saved)}건 저장, "
-            f"기존ID 스킵 {skipped_existing}건, 업로드 실패 {upload_failed}건"
-        )
+    # 모든 소스를 병렬 처리 (소스별 1스레드)
+    with ThreadPoolExecutor(max_workers=len(targets)) as executor:
+        future_map = {
+            executor.submit(
+                _process_source, target, blob_client,
+                date_folder, max_pages_val, detail_workers,
+            ): target
+            for target in targets
+        }
+        for future in as_completed(future_map):
+            target = future_map[future]
+            try:
+                res = future.result()
+                total_saved.extend(res["saved"])
+                total_skipped_existing += res["skipped_existing"]
+                total_upload_failed += res["upload_failed"]
+                total_pre_existing += res["pre_existing"]
+                retried_sources[target] = max(res["crawl_attempts"] - 1, 0)
+                counts[target] = res["doc_count"]
+            except Exception as e:
+                logging.error(f"[{target}] 처리 실패: {e}")
+                counts[target] = 0
 
     elapsed = round((datetime.now(timezone.utc) - start).total_seconds(), 2)
     result = {
@@ -121,6 +127,7 @@ def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
         "counts": counts,
         "total_docs": sum(counts.values()),
         "total_files": len(total_saved),
+        "total_pre_existing": total_pre_existing,
         "total_skipped_existing": total_skipped_existing,
         "total_upload_failed": total_upload_failed,
         "retried_sources": retried_sources,
@@ -147,6 +154,72 @@ def _make_blob_client() -> BlobServiceClient | None:
     except Exception as e:
         logging.error(f"BlobServiceClient 생성 실패: {e}")
         return None
+
+
+def _get_existing_seqs(blob_client: BlobServiceClient | None, source: str) -> set[str]:
+    """Blob Storage에서 이미 크롤링된 seq ID 목록 (모든 날짜 폴더 통합)"""
+    if not blob_client:
+        return set()
+    try:
+        container = blob_client.get_container_client(BLOB_CONTAINER_NAME)
+        seqs = set()
+        for blob in container.list_blobs(name_starts_with=f"{source}/"):
+            filename = blob.name.rsplit("/", 1)[-1]
+            if filename.startswith(f"{source}_") and filename.endswith(".json"):
+                seqs.add(filename[len(f"{source}_"):-5])
+        logging.info(f"[{source}] 기존 blob {len(seqs)}건 발견 → 크롤링 제외")
+        return seqs
+    except Exception as e:
+        logging.warning(f"[{source}] 기존 blob 조회 실패: {e}")
+        return set()
+
+
+def _process_source(
+    target: str,
+    blob_client: BlobServiceClient | None,
+    date_folder: str,
+    max_pages: int | None,
+    detail_workers: int,
+) -> dict:
+    """단일 소스 처리: 기존 blob 조회 → 크롤링 (기존 제외) → 업로드"""
+    CrawlerClass, _ = _CRAWLERS[target]
+    crawler = CrawlerClass()
+
+    existing_seqs = _get_existing_seqs(blob_client, target)
+
+    docs, crawl_attempts = _crawl_with_retry(
+        crawler=crawler,
+        source=target,
+        max_pages=max_pages,
+        retry_count=CRAWL_RETRY_COUNT,
+        sleep_seconds=RETRY_SLEEP_SECONDS,
+        skip_seqs=existing_seqs,
+        detail_workers=detail_workers,
+    )
+
+    saved, skipped_existing, upload_failed = _upload_docs(
+        blob_client=blob_client,
+        docs=docs,
+        source=target,
+        date_folder=date_folder,
+        retry_count=UPLOAD_RETRY_COUNT,
+        sleep_seconds=RETRY_SLEEP_SECONDS,
+    )
+
+    logging.info(
+        f"[{target}] {len(docs)}건 수집, {len(saved)}건 저장, "
+        f"기존blob {len(existing_seqs)}건 제외, "
+        f"당일중복 {skipped_existing}건, 업로드실패 {upload_failed}건"
+    )
+
+    return {
+        "saved": saved,
+        "skipped_existing": skipped_existing,
+        "upload_failed": upload_failed,
+        "crawl_attempts": crawl_attempts,
+        "doc_count": len(docs),
+        "pre_existing": len(existing_seqs),
+    }
 
 
 def _upload_docs(
@@ -209,19 +282,22 @@ def _upload_docs(
 def _crawl_with_retry(
     crawler,
     source: str,
-    max_pages: int,
+    max_pages: int | None,
     retry_count: int,
     sleep_seconds: float,
+    skip_seqs: set[str] | None = None,
+    detail_workers: int = 1,
 ) -> tuple[list[dict], int]:
     """Run crawler with source-level retry. Returns docs and attempts used."""
     last_error = None
     docs: list[dict] = []
 
     for attempt in range(1, retry_count + 2):
-        docs = []
         try:
-            for doc in crawler.crawl_all(query="*", max_pages=max_pages):
-                docs.append(doc)
+            docs = crawler.crawl_all(
+                query="*", max_pages=max_pages,
+                skip_seqs=skip_seqs, max_workers=detail_workers,
+            )
             return docs, attempt
         except Exception as e:
             last_error = e

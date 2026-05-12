@@ -5,10 +5,11 @@
 //
 //   az deployment group create \
 //     --resource-group <rg> \
-//     --template-file infra/modules/ai-search-spl.bicep \
+//     --template-file infra/sweden/modules/ai-search-spl.bicep \
 //     --parameters searchServiceName=<name> \
 //                  storageAccountId=<id> \
-//                  aiServicesId=<id>
+//                  aiServicesId=<id> \
+//                  docIntelligenceId=<id>
 // ============================================
 
 @description('AI Search 서비스 이름')
@@ -19,6 +20,9 @@ param storageAccountId string
 
 @description('AI Services 리소스 ID')
 param aiServicesId string
+
+@description('Document Intelligence 리소스 ID')
+param docIntelligenceId string
 
 resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
   name: searchServiceName
@@ -47,5 +51,17 @@ resource sharedPlAiServices 'Microsoft.Search/searchServices/sharedPrivateLinkRe
   }
 }
 
+// ── Shared Private Link: AI Search → Document Intelligence ──
+resource sharedPlDocIntel 'Microsoft.Search/searchServices/sharedPrivateLinkResources@2024-06-01-preview' = {
+  parent: searchService
+  name: 'spl-docintel'
+  properties: {
+    privateLinkResourceId: docIntelligenceId
+    groupId: 'cognitiveservices_account'
+    requestMessage: 'AI Search skillset needs access to Document Intelligence for layout analysis'
+  }
+}
+
 output splBlobId string = sharedPlStorage.id
 output splAiServicesId string = sharedPlAiServices.id
+output splDocIntelId string = sharedPlDocIntel.id

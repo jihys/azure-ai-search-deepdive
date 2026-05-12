@@ -26,6 +26,7 @@ from typing import Generator
 
 import requests
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -204,15 +205,71 @@ class _BaseWebCrawler:
         start_page: int = 1,
         max_pages: int | None = None,
         delay_detail: float | None = None,
-    ) -> Generator[dict, None, None]:
-        """목록 순회 + 상세 수집 후 yield"""
+        skip_seqs: set[str] | None = None,
+        max_workers: int = 1,
+    ) -> list[dict]:
+        """목록 순회 + 상세 수집 (skip_seqs로 기존 건 제외, max_workers로 병렬 수집)"""
         delay = delay_detail if delay_detail is not None else self.delay_detail
+        skip = skip_seqs or set()
+
+        # 1단계: 목록 수집 (스킵 대상 제외)
+        items_to_fetch = []
+        skipped = 0
         for item in self.iter_list(query=query, start_page=start_page, max_pages=max_pages):
             seq = item[self.SEQ_FIELD]
-            doc = self.get_detail(seq)
-            if doc:
-                yield doc
-            time.sleep(delay)
+            if seq in skip:
+                skipped += 1
+                continue
+            items_to_fetch.append(item)
+
+        logger.info(
+            "[%s] 목록 %d건 수집, %d건 스킵(기존), workers=%d",
+            self.SOURCE_NAME, len(items_to_fetch), skipped, max_workers,
+        )
+
+        if not items_to_fetch:
+            return []
+
+        # 2단계: 상세 수집 (병렬 지원)
+        results: list[dict] = []
+        if max_workers <= 1:
+            for item in items_to_fetch:
+                seq = item[self.SEQ_FIELD]
+                doc = self.get_detail(seq)
+                if doc:
+                    results.append(doc)
+                time.sleep(delay)
+        else:
+            def _fetch(seq: str) -> dict | None:
+                try:
+                    resp = requests.get(
+                        self.DETAIL_URL,
+                        params={self.SEQ_FIELD: seq},
+                        headers=_HEADERS,
+                        timeout=self.timeout,
+                    )
+                    resp.raise_for_status()
+                    doc = self.parse_detail(resp.text, seq)
+                    time.sleep(delay)
+                    return doc
+                except Exception as e:
+                    logger.warning("[%s] 상세 수집 실패 seq=%s: %s", self.SOURCE_NAME, seq, e)
+                    return None
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(_fetch, item[self.SEQ_FIELD])
+                    for item in items_to_fetch
+                ]
+                for future in as_completed(futures):
+                    try:
+                        doc = future.result()
+                        if doc:
+                            results.append(doc)
+                    except Exception as e:
+                        logger.warning("[%s] 상세 수집 예외: %s", self.SOURCE_NAME, e)
+
+        return results
 
     # ──────────────────────────────────────────────────────────────────────────
     # 공통 파싱 유틸

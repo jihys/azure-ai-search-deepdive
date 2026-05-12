@@ -1,6 +1,7 @@
 // ============================================
 // Azure AI Services (Foundry 호환) + Model Deployment
 // kind: AIServices = Azure AI Foundry 백엔드
+// GPT-5.4 GlobalStandard (리전 무관 글로벌 배포)
 // ============================================
 
 @description('배포 리전')
@@ -12,11 +13,14 @@ param suffix string
 @description('Embedding 모델 배포명')
 param embeddingDeploymentName string = 'text-embedding-3-large'
 
-@description('GPT-5.4 모델 배포명 (RAG 질의응답용)')
-param gpt54DeploymentName string = 'gpt-5.4'
+@description('GPT-5.4 모델 배포명')
+param gptDeploymentName string = 'gpt-5.4'
 
-@description('GPT-5.4 모델 버전 — Azure Portal에서 사용 가능한 버전 확인 후 입력')
-param gpt54ModelVersion string
+@description('GPT 모델 이름')
+param gptModelName string = 'gpt-5.4'
+
+@description('GPT 모델 버전')
+param gptModelVersion string
 
 var accountName = 'ais-ragi-${take(suffix, 8)}'
 
@@ -56,9 +60,9 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   }
 }
 
-resource gpt54Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+resource gptDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
   parent: openaiAccount
-  name: gpt54DeploymentName
+  name: gptDeploymentName
   sku: {
     name: 'GlobalStandard'
     capacity: 30
@@ -66,8 +70,8 @@ resource gpt54Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   properties: {
     model: {
       format: 'OpenAI'
-      name: 'gpt-5.4'
-      version: gpt54ModelVersion
+      name: gptModelName
+      version: gptModelVersion
     }
   }
   dependsOn: [
@@ -78,4 +82,4 @@ resource gpt54Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
 output endpoint string = openaiAccount.properties.endpoint
 output accountName string = openaiAccount.name
 output accountId string = openaiAccount.id
-output gpt54DeploymentName string = gpt54Deployment.name
+output gptDeploymentName string = gptDeployment.name

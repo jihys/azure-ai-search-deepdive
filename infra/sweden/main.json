@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "5113308233501344258"
+      "templateHash": "13532832479710297947"
     }
   },
   "parameters": {
@@ -41,25 +41,25 @@
       "type": "string",
       "defaultValue": "gpt-5.4",
       "metadata": {
-        "description": "Azure OpenAI GPT 모델 배포명"
+        "description": "Azure OpenAI GPT-5.4 모델 배포명"
       }
     },
-    "gpt54DeploymentName": {
+    "gptModelVersion": {
+      "type": "string",
+      "metadata": {
+        "description": "GPT 모델 버전"
+      }
+    },
+    "gptModelName": {
       "type": "string",
       "defaultValue": "gpt-5.4",
       "metadata": {
-        "description": "Azure OpenAI GPT-5.4 배포명 (RAG 질의응답용)"
-      }
-    },
-    "gpt54ModelVersion": {
-      "type": "string",
-      "metadata": {
-        "description": "GPT-5.4 모델 버전 — Azure Portal에서 확인 후 입력"
+        "description": "GPT 모델 이름 (GlobalStandard)"
       }
     },
     "searchSku": {
       "type": "string",
-      "defaultValue": "basic",
+      "defaultValue": "standard",
       "allowedValues": [
         "basic",
         "standard",
@@ -81,6 +81,26 @@
       "defaultValue": 10,
       "metadata": {
         "description": "크롤러가 수집할 법령 건수"
+      }
+    },
+    "jumpvmAdminUsername": {
+      "type": "string",
+      "defaultValue": "azureadmin",
+      "metadata": {
+        "description": "JumpVM 관리자 계정명"
+      }
+    },
+    "jumpvmAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "JumpVM 관리자 비밀번호"
+      }
+    },
+    "jumpvmEntraUserObjectIds": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "JumpVM Entra ID 로그인을 허용할 사용자 Object ID 목록"
       }
     }
   },
@@ -121,7 +141,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "11715748128147951969"
+              "templateHash": "16464382480178098989"
             }
           },
           "parameters": {
@@ -141,6 +161,7 @@
           "variables": {
             "vnetName": "[format('vnet-ragi-{0}', take(parameters('suffix'), 8))]",
             "nsgName": "[format('nsg-pep-ragi-{0}', take(parameters('suffix'), 8))]",
+            "jumpSubnetName": "snet-jump",
             "pepSubnetName": "snet-pep",
             "funcSubnetName": "snet-func"
           },
@@ -169,6 +190,12 @@
                   ]
                 },
                 "subnets": [
+                  {
+                    "name": "[variables('jumpSubnetName')]",
+                    "properties": {
+                      "addressPrefix": "10.0.0.0/24"
+                    }
+                  },
                   {
                     "name": "[variables('pepSubnetName')]",
                     "properties": {
@@ -302,6 +329,81 @@
                 "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')]",
                 "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
               ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "privatelink.api.azureml.ms",
+              "location": "global",
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.api.azureml.ms', format('link-azureml-{0}', take(parameters('suffix'), 8)))]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.api.azureml.ms')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "privatelink.notebooks.azure.net",
+              "location": "global",
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.notebooks.azure.net', format('link-notebooks-{0}', take(parameters('suffix'), 8)))]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.notebooks.azure.net')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "privatelink.vaultcore.azure.net",
+              "location": "global",
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.vaultcore.azure.net', format('link-vault-{0}', take(parameters('suffix'), 8)))]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -321,6 +423,10 @@
               "type": "string",
               "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('funcSubnetName'))]"
             },
+            "jumpSubnetId": {
+              "type": "string",
+              "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('jumpSubnetName'))]"
+            },
             "blobDnsZoneId": {
               "type": "string",
               "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.blob.core.windows.net')]"
@@ -336,6 +442,18 @@
             "openaiDnsZoneId": {
               "type": "string",
               "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')]"
+            },
+            "azuremlDnsZoneId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.api.azureml.ms')]"
+            },
+            "notebooksDnsZoneId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.notebooks.azure.net')]"
+            },
+            "vaultDnsZoneId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
             }
           }
         }
@@ -363,6 +481,9 @@
           },
           "containerName": {
             "value": "[parameters('blobContainerName')]"
+          },
+          "userObjectIds": {
+            "value": "[parameters('jumpvmEntraUserObjectIds')]"
           }
         },
         "template": {
@@ -372,7 +493,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "6295179967214398936"
+              "templateHash": "16287627993364987067"
             }
           },
           "parameters": {
@@ -393,6 +514,13 @@
               "defaultValue": "raw-documents",
               "metadata": {
                 "description": "Blob 컨테이너 이름"
+              }
+            },
+            "userObjectIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Storage Data 역할을 부여할 Entra ID 사용자 Object ID 배열"
               }
             }
           },
@@ -454,6 +582,60 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
               ]
+            },
+            {
+              "copy": {
+                "name": "blobRbac",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), parameters('userObjectIds')[copyIndex()], 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "queueRbac",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), parameters('userObjectIds')[copyIndex()], '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "tableRbac",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), parameters('userObjectIds')[copyIndex()], '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -499,11 +681,11 @@
           "gptDeploymentName": {
             "value": "[parameters('gptDeploymentName')]"
           },
-          "gpt54DeploymentName": {
-            "value": "[parameters('gpt54DeploymentName')]"
+          "gptModelName": {
+            "value": "[parameters('gptModelName')]"
           },
-          "gpt54ModelVersion": {
-            "value": "[parameters('gpt54ModelVersion')]"
+          "gptModelVersion": {
+            "value": "[parameters('gptModelVersion')]"
           }
         },
         "template": {
@@ -513,7 +695,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "1125128595584504938"
+              "templateHash": "3999667688799672362"
             }
           },
           "parameters": {
@@ -538,22 +720,22 @@
             },
             "gptDeploymentName": {
               "type": "string",
-              "defaultValue": "gpt-4o",
+              "defaultValue": "gpt-5.4",
               "metadata": {
-                "description": "GPT 모델 배포명"
+                "description": "GPT-5.4 모델 배포명"
               }
             },
-            "gpt54DeploymentName": {
+            "gptModelName": {
               "type": "string",
               "defaultValue": "gpt-5.4",
               "metadata": {
-                "description": "GPT-5.4 모델 배포명 (RAG 질의응답용)"
+                "description": "GPT 모델 이름"
               }
             },
-            "gpt54ModelVersion": {
+            "gptModelVersion": {
               "type": "string",
               "metadata": {
-                "description": "GPT-5.4 모델 버전 — Azure Portal에서 사용 가능한 버전 확인 후 입력"
+                "description": "GPT 모델 버전"
               }
             }
           },
@@ -611,32 +793,12 @@
               "properties": {
                 "model": {
                   "format": "OpenAI",
-                  "name": "gpt-4o",
-                  "version": "2024-11-20"
+                  "name": "[parameters('gptModelName')]",
+                  "version": "[parameters('gptModelVersion')]"
                 }
               },
               "dependsOn": [
                 "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('accountName'), parameters('embeddingDeploymentName'))]",
-                "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.CognitiveServices/accounts/deployments",
-              "apiVersion": "2024-10-01",
-              "name": "[format('{0}/{1}', variables('accountName'), parameters('gpt54DeploymentName'))]",
-              "sku": {
-                "name": "GlobalStandard",
-                "capacity": 30
-              },
-              "properties": {
-                "model": {
-                  "format": "OpenAI",
-                  "name": "gpt-5.4",
-                  "version": "[parameters('gpt54ModelVersion')]"
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('accountName'), parameters('gptDeploymentName'))]",
                 "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
               ]
             }
@@ -654,9 +816,9 @@
               "type": "string",
               "value": "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
             },
-            "gpt54DeploymentName": {
+            "gptDeploymentName": {
               "type": "string",
-              "value": "[parameters('gpt54DeploymentName')]"
+              "value": "[parameters('gptDeploymentName')]"
             }
           }
         }
@@ -1316,6 +1478,273 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
+      "name": "foundry-hub-deployment",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "suffix": {
+            "value": "[parameters('suffix')]"
+          },
+          "storageAccountId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment'), '2025-04-01').outputs.storageAccountId.value]"
+          },
+          "storageAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment'), '2025-04-01').outputs.storageAccountName.value]"
+          },
+          "searchServiceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'ai-search-deployment'), '2025-04-01').outputs.searchServiceId.value]"
+          },
+          "searchServiceName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'ai-search-deployment'), '2025-04-01').outputs.searchServiceName.value]"
+          },
+          "searchEndpoint": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'ai-search-deployment'), '2025-04-01').outputs.endpoint.value]"
+          },
+          "aiServicesId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.accountId.value]"
+          },
+          "aiServicesName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.accountName.value]"
+          },
+          "aiServicesEndpoint": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.endpoint.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "11035976316453375482"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "배포 리전"
+              }
+            },
+            "suffix": {
+              "type": "string",
+              "metadata": {
+                "description": "리소스 이름 접미사"
+              }
+            },
+            "storageAccountId": {
+              "type": "string",
+              "metadata": {
+                "description": "기존 Storage Account 리소스 ID"
+              }
+            },
+            "storageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "기존 Storage Account 이름"
+              }
+            },
+            "searchServiceId": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Search 서비스 리소스 ID"
+              }
+            },
+            "searchServiceName": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Search 서비스 이름"
+              }
+            },
+            "searchEndpoint": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Search 엔드포인트"
+              }
+            },
+            "aiServicesId": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Services 리소스 ID"
+              }
+            },
+            "aiServicesName": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Services 계정 이름"
+              }
+            },
+            "aiServicesEndpoint": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Services 엔드포인트"
+              }
+            }
+          },
+          "variables": {
+            "hubName": "[format('hub-ragi-{0}', take(parameters('suffix'), 8))]",
+            "projectName": "[format('proj-ragi-{0}', take(parameters('suffix'), 8))]",
+            "keyVaultName": "[format('kv-ragi-{0}', take(parameters('suffix'), 8))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('keyVaultName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "tenantId": "[subscription().tenantId]",
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "softDeleteRetentionInDays": 7,
+                "networkAcls": {
+                  "defaultAction": "Deny",
+                  "bypass": "AzureServices"
+                }
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces",
+              "apiVersion": "2024-10-01",
+              "name": "[variables('hubName')]",
+              "location": "[parameters('location')]",
+              "kind": "Hub",
+              "sku": {
+                "name": "Basic",
+                "tier": "Basic"
+              },
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "friendlyName": "RAG Indexing Lab Hub",
+                "description": "Private AI Search 연결용 Azure AI Foundry Hub (BYO VNet)",
+                "storageAccount": "[parameters('storageAccountId')]",
+                "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+                "publicNetworkAccess": "Disabled"
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces",
+              "apiVersion": "2024-10-01",
+              "name": "[variables('projectName')]",
+              "location": "[parameters('location')]",
+              "kind": "Project",
+              "sku": {
+                "name": "Basic",
+                "tier": "Basic"
+              },
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "friendlyName": "RAG Indexing Lab Project",
+                "hubResourceId": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]",
+                "publicNetworkAccess": "Disabled"
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces/connections",
+              "apiVersion": "2024-10-01",
+              "name": "[format('{0}/{1}', variables('hubName'), 'aisearch')]",
+              "properties": {
+                "category": "CognitiveSearch",
+                "target": "[parameters('searchEndpoint')]",
+                "authType": "AAD",
+                "metadata": {
+                  "ApiType": "azure",
+                  "ApiVersion": "2024-07-01",
+                  "ResourceId": "[parameters('searchServiceId')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces/connections",
+              "apiVersion": "2024-10-01",
+              "name": "[format('{0}/{1}', variables('hubName'), 'aiservices')]",
+              "properties": {
+                "category": "AzureOpenAI",
+                "target": "[parameters('aiServicesEndpoint')]",
+                "authType": "AAD",
+                "metadata": {
+                  "ApiType": "azure",
+                  "ApiVersion": "2024-10-01",
+                  "ResourceId": "[parameters('aiServicesId')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "hubId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]"
+            },
+            "hubName": {
+              "type": "string",
+              "value": "[variables('hubName')]"
+            },
+            "hubPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName')), '2024-10-01', 'full').identity.principalId]"
+            },
+            "projectName": {
+              "type": "string",
+              "value": "[variables('projectName')]"
+            },
+            "keyVaultId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+            },
+            "keyVaultName": {
+              "type": "string",
+              "value": "[variables('keyVaultName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'ai-search-deployment')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "private-endpoints-deployment",
       "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
@@ -1345,6 +1774,12 @@
           "docIntelligenceId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'doc-intelligence-deployment'), '2025-04-01').outputs.docIntelligenceId.value]"
           },
+          "hubId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-hub-deployment'), '2025-04-01').outputs.hubId.value]"
+          },
+          "keyVaultId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-hub-deployment'), '2025-04-01').outputs.keyVaultId.value]"
+          },
           "blobDnsZoneId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.blobDnsZoneId.value]"
           },
@@ -1356,6 +1791,15 @@
           },
           "openaiDnsZoneId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.openaiDnsZoneId.value]"
+          },
+          "azuremlDnsZoneId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.azuremlDnsZoneId.value]"
+          },
+          "notebooksDnsZoneId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.notebooksDnsZoneId.value]"
+          },
+          "vaultDnsZoneId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.vaultDnsZoneId.value]"
           }
         },
         "template": {
@@ -1365,7 +1809,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "16233250012842044215"
+              "templateHash": "13724224604013822509"
             }
           },
           "parameters": {
@@ -1411,6 +1855,18 @@
                 "description": "Document Intelligence 리소스 ID"
               }
             },
+            "hubId": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Foundry Hub 리소스 ID"
+              }
+            },
+            "keyVaultId": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault 리소스 ID"
+              }
+            },
             "blobDnsZoneId": {
               "type": "string",
               "metadata": {
@@ -1433,6 +1889,24 @@
               "type": "string",
               "metadata": {
                 "description": "OpenAI Private DNS Zone ID"
+              }
+            },
+            "azuremlDnsZoneId": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure ML Private DNS Zone ID"
+              }
+            },
+            "notebooksDnsZoneId": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure ML Notebooks Private DNS Zone ID"
+              }
+            },
+            "vaultDnsZoneId": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault Private DNS Zone ID"
               }
             }
           },
@@ -1614,6 +2088,98 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Network/privateEndpoints', format('pe-docintel-ragi-{0}', take(parameters('suffix'), 8)))]"
               ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-01-01",
+              "name": "[format('pe-hub-ragi-{0}', take(parameters('suffix'), 8))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('pepSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "pe-hub-conn",
+                    "properties": {
+                      "privateLinkServiceId": "[parameters('hubId')]",
+                      "groupIds": [
+                        "amlworkspace"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-01-01",
+              "name": "[format('{0}/{1}', format('pe-hub-ragi-{0}', take(parameters('suffix'), 8)), 'hub-dns-group')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "azureml",
+                    "properties": {
+                      "privateDnsZoneId": "[parameters('azuremlDnsZoneId')]"
+                    }
+                  },
+                  {
+                    "name": "notebooks",
+                    "properties": {
+                      "privateDnsZoneId": "[parameters('notebooksDnsZoneId')]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pe-hub-ragi-{0}', take(parameters('suffix'), 8)))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-01-01",
+              "name": "[format('pe-kv-ragi-{0}', take(parameters('suffix'), 8))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('pepSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "pe-kv-conn",
+                    "properties": {
+                      "privateLinkServiceId": "[parameters('keyVaultId')]",
+                      "groupIds": [
+                        "vault"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-01-01",
+              "name": "[format('{0}/{1}', format('pe-kv-ragi-{0}', take(parameters('suffix'), 8)), 'kv-dns-group')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "vaultcore",
+                    "properties": {
+                      "privateDnsZoneId": "[parameters('vaultDnsZoneId')]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pe-kv-ragi-{0}', take(parameters('suffix'), 8)))]"
+              ]
             }
           ],
           "outputs": {
@@ -1632,6 +2198,14 @@
             "docIntelPeId": {
               "type": "string",
               "value": "[resourceId('Microsoft.Network/privateEndpoints', format('pe-docintel-ragi-{0}', take(parameters('suffix'), 8)))]"
+            },
+            "hubPeId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateEndpoints', format('pe-hub-ragi-{0}', take(parameters('suffix'), 8)))]"
+            },
+            "kvPeId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateEndpoints', format('pe-kv-ragi-{0}', take(parameters('suffix'), 8)))]"
             }
           }
         }
@@ -1639,9 +2213,344 @@
       "dependsOn": [
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'ai-search-deployment')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'doc-intelligence-deployment')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-hub-deployment')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "jumpvm-deployment",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "jumpSubnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.jumpSubnetId.value]"
+          },
+          "adminUsername": {
+            "value": "[parameters('jumpvmAdminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('jumpvmAdminPassword')]"
+          },
+          "entraUserObjectIds": {
+            "value": "[parameters('jumpvmEntraUserObjectIds')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "11057931200551570598"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "배포 리전"
+              }
+            },
+            "jumpSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "JumpVM 서브넷 ID (snet-jump, 10.0.0.0/24)"
+              }
+            },
+            "adminUsername": {
+              "type": "string",
+              "metadata": {
+                "description": "VM 관리자 계정명"
+              }
+            },
+            "adminPassword": {
+              "type": "securestring",
+              "metadata": {
+                "description": "VM 관리자 비밀번호"
+              }
+            },
+            "vmSize": {
+              "type": "string",
+              "defaultValue": "Standard_B2s_v2",
+              "metadata": {
+                "description": "VM 크기"
+              }
+            },
+            "osPublisher": {
+              "type": "string",
+              "defaultValue": "MicrosoftWindowsDesktop",
+              "metadata": {
+                "description": "Windows 이미지 Publisher"
+              }
+            },
+            "osOffer": {
+              "type": "string",
+              "defaultValue": "windows-11",
+              "metadata": {
+                "description": "Windows 이미지 Offer"
+              }
+            },
+            "osSku": {
+              "type": "string",
+              "defaultValue": "win11-24h2-pro",
+              "metadata": {
+                "description": "Windows 이미지 SKU"
+              }
+            },
+            "entraUserObjectIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Entra ID 로그인을 허용할 사용자 Object ID 목록"
+              }
+            },
+            "vmName": {
+              "type": "string",
+              "defaultValue": "jumpvmragi01",
+              "metadata": {
+                "description": "JumpVM 이름"
+              }
+            },
+            "nicName": {
+              "type": "string",
+              "defaultValue": "jumpvmragi01VMNic",
+              "metadata": {
+                "description": "JumpVM NIC 이름"
+              }
+            },
+            "pipName": {
+              "type": "string",
+              "defaultValue": "jumpvmragi01PublicIP",
+              "metadata": {
+                "description": "JumpVM Public IP 이름"
+              }
+            },
+            "nsgName": {
+              "type": "string",
+              "defaultValue": "jumpvmragi01NSG",
+              "metadata": {
+                "description": "JumpVM NSG 이름"
+              }
+            }
+          },
+          "variables": {
+            "vmUserLoginRoleId": "fb879df8-f326-4884-b1cf-06f3ad86be52"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2024-01-01",
+              "name": "[parameters('nsgName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "AllowRDP",
+                    "properties": {
+                      "priority": 300,
+                      "protocol": "Tcp",
+                      "access": "Allow",
+                      "direction": "Inbound",
+                      "sourceAddressPrefix": "Internet",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRange": "3389",
+                      "description": "JumpVM RDP 접근 - 운영 환경에서는 소스 IP를 제한하세요"
+                    }
+                  }
+                ]
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/publicIPAddresses",
+              "apiVersion": "2024-01-01",
+              "name": "[parameters('pipName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "publicIPAllocationMethod": "Static"
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkInterfaces",
+              "apiVersion": "2024-01-01",
+              "name": "[parameters('nicName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "networkSecurityGroup": {
+                  "id": "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('nsgName'))]"
+                },
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[parameters('jumpSubnetId')]"
+                      },
+                      "privateIPAllocationMethod": "Dynamic",
+                      "publicIPAddress": {
+                        "id": "[resourceId('Microsoft.Network/publicIPAddresses', parameters('pipName'))]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('nsgName'))]",
+                "[resourceId('Microsoft.Network/publicIPAddresses', parameters('pipName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines",
+              "apiVersion": "2024-03-01",
+              "name": "[parameters('vmName')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "publisher": "[parameters('osPublisher')]",
+                    "offer": "[parameters('osOffer')]",
+                    "sku": "[parameters('osSku')]",
+                    "version": "latest"
+                  },
+                  "osDisk": {
+                    "createOption": "FromImage",
+                    "managedDisk": {
+                      "storageAccountType": "StandardSSD_LRS"
+                    },
+                    "deleteOption": "Delete"
+                  }
+                },
+                "osProfile": {
+                  "computerName": "jumpvm",
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "adminPassword": "[parameters('adminPassword')]",
+                  "windowsConfiguration": {
+                    "enableAutomaticUpdates": true,
+                    "patchSettings": {
+                      "patchMode": "AutomaticByOS"
+                    }
+                  }
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.Network/networkInterfaces', parameters('nicName'))]"
+                    }
+                  ]
+                }
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', parameters('nicName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines/extensions",
+              "apiVersion": "2024-03-01",
+              "name": "[format('{0}/{1}', parameters('vmName'), 'AADLoginForWindows')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "publisher": "Microsoft.Azure.ActiveDirectory",
+                "type": "AADLoginForWindows",
+                "typeHandlerVersion": "2.0",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                  "mdmId": ""
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines', parameters('vmName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines/extensions",
+              "apiVersion": "2024-03-01",
+              "name": "[format('{0}/{1}', parameters('vmName'), 'InstallDevTools')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "publisher": "Microsoft.Compute",
+                "type": "CustomScriptExtension",
+                "typeHandlerVersion": "1.10",
+                "autoUpgradeMinorVersion": true,
+                "protectedSettings": {
+                  "commandToExecute": "powershell -ExecutionPolicy Bypass -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; if (-not (Get-Command choco -ErrorAction SilentlyContinue)) { Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = 3072; iwr https://community.chocolatey.org/install.ps1 -UseBasicParsing | iex }; choco feature enable -n=allowGlobalConfirmation; choco install -y vscode git git.install gh azure-cli python3\""
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines/extensions', parameters('vmName'), 'AADLoginForWindows')]",
+                "[resourceId('Microsoft.Compute/virtualMachines', parameters('vmName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "entraUserVmLogin",
+                "count": "[length(parameters('entraUserObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Compute/virtualMachines', parameters('vmName'))]",
+              "name": "[guid(resourceId('Microsoft.Compute/virtualMachines', parameters('vmName')), parameters('entraUserObjectIds')[copyIndex()], variables('vmUserLoginRoleId'))]",
+              "properties": {
+                "principalId": "[parameters('entraUserObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('vmUserLoginRoleId'))]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines', parameters('vmName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vmName": {
+              "type": "string",
+              "value": "[parameters('vmName')]"
+            },
+            "publicIpAddress": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', parameters('pipName')), '2024-01-01').ipAddress]"
+            },
+            "privateIpAddress": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2024-01-01').ipConfigurations[0].properties.privateIPAddress]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment')]"
       ]
     }
@@ -1675,9 +2584,9 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.accountName.value]"
     },
-    "gpt54DeploymentName": {
+    "gptDeploymentName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.gpt54DeploymentName.value]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.gptDeploymentName.value]"
     },
     "aiSearchEndpoint": {
       "type": "string",
@@ -1706,6 +2615,26 @@
     "crawlLogicAppName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'logic-app-crawl-deployment'), '2025-04-01').outputs.crawlWorkflowName.value]"
+    },
+    "jumpvmName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'jumpvm-deployment'), '2025-04-01').outputs.vmName.value]"
+    },
+    "jumpvmPublicIp": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'jumpvm-deployment'), '2025-04-01').outputs.publicIpAddress.value]"
+    },
+    "foundryHubName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-hub-deployment'), '2025-04-01').outputs.hubName.value]"
+    },
+    "foundryProjectName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-hub-deployment'), '2025-04-01').outputs.projectName.value]"
+    },
+    "foundryKeyVaultName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-hub-deployment'), '2025-04-01').outputs.keyVaultName.value]"
     }
   }
 }

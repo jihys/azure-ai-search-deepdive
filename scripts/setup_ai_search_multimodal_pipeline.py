@@ -2,7 +2,7 @@
 AI Search 멀티모달 인덱싱 파이프라인 설정 스크립트
 
 두 가지 파이프라인을 생성하여 성능 비교:
-  [Pipeline A] basic — DI Layout + Markdown 헤더 분할 + Embedding
+  [Pipeline A] basic — DI Layout + Native SplitSkill (markdown mode) + Embedding (Function App 불필요)
   [Pipeline B] verbalized — DI Layout + GPT-5.4 이미지 설명 + Markdown 헤더 분할 + Embedding
 
 동작 방식:
@@ -158,17 +158,16 @@ def create_basic_skillset(
     openai_endpoint: str,
     embedding_deployment: str,
     dimensions: int,
-    skills_function_url: str,
-    skills_function_key: str,
     max_chunk_chars: int,
     overlap_chars: int,
 ) -> None:
-    """Pipeline A: DI Layout → Markdown Header Split (Custom Skill) → Embedding"""
+    """Pipeline B (Basic): DI Layout → Native SplitSkill (markdown mode) → Embedding
+    별도 Function App 불필요 — AI Search 내장 스킬만 사용"""
     print(f"  [skillset] {skillset_name}")
 
     skillset_payload = {
         "name": skillset_name,
-        "description": "Multimodal PDF: DI Layout + Markdown Header Split + Embedding (no verbalization)",
+        "description": "Multimodal PDF: DI Layout + Native Markdown Split + Embedding (no verbalization, no custom skill)",
         "skills": [
             {
                 "@odata.type": "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill",
@@ -184,24 +183,18 @@ def create_basic_skillset(
                 ],
             },
             {
-                "@odata.type": "#Microsoft.Skills.Custom.WebApiSkill",
+                "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
                 "name": "markdown-split-skill",
-                "description": "Markdown 헤더 기반 분할 (Custom Function)",
+                "description": "Native Markdown 헤더 기반 분할 (AI Search 내장)",
                 "context": "/document",
-                "uri": f"{skills_function_url}/api/markdown_split",
-                "httpMethod": "POST",
-                "timeout": "PT60S",
-                "batchSize": 1,
-                "httpHeaders": {
-                    "x-functions-key": skills_function_key,
-                },
+                "textSplitMode": "markdown",
+                "maximumPageLength": max_chunk_chars,
+                "pageOverlapLength": overlap_chars,
                 "inputs": [
                     {"name": "text", "source": "/document/layout_markdown"},
-                    {"name": "max_chunk_chars", "source": f"='{max_chunk_chars}'"},
-                    {"name": "overlap_chars", "source": f"='{overlap_chars}'"},
                 ],
                 "outputs": [
-                    {"name": "chunks", "targetName": "markdown_chunks"},
+                    {"name": "textItems", "targetName": "markdown_chunks"},
                 ],
             },
             {
@@ -243,7 +236,7 @@ def create_basic_skillset(
 
     delete_if_exists(client, f"/skillsets/{skillset_name}")
     client.request("PUT", f"/skillsets/{skillset_name}", skillset_payload)
-    print(f"    ✓ created (DI Layout → Markdown Split → Embedding)")
+    print(f"    ✓ created (DI Layout → Native SplitSkill[markdown] → Embedding)")
 
 
 def create_verbalized_skillset(
@@ -492,8 +485,8 @@ def main() -> None:
         raise ValueError("AZURE_SEARCH_SERVICE_ENDPOINT (or AZURE_SEARCH_ENDPOINT) is required.")
     if not openai_endpoint:
         raise ValueError("AZURE_OPENAI_ENDPOINT is required.")
-    if not skills_function_url:
-        raise ValueError("SKILLS_FUNCTION_URL is required (deployed skills-function URL).")
+    if args.pipeline in ("both", "verbalized") and not skills_function_url:
+        raise ValueError("SKILLS_FUNCTION_URL is required for verbalized pipeline (deployed skills-function URL).")
 
     prefix = args.prefix or f"raw/pdf/{args.source}/"
 
@@ -531,9 +524,9 @@ def main() -> None:
     )
     print()
 
-    # ── Pipeline A: Basic (no verbalization) ──
+    # ── Pipeline A: Basic (no verbalization, no custom skill) ──
     if args.pipeline in ("both", "basic"):
-        print("[2A] Pipeline BASIC (DI Layout → Markdown Split → Embedding)")
+        print("[2A] Pipeline BASIC (DI Layout → Native SplitSkill[markdown] → Embedding)")
         create_index(client, index_name=basic_index, dimensions=args.dimensions)
         create_basic_skillset(
             client,
@@ -542,8 +535,6 @@ def main() -> None:
             openai_endpoint=openai_endpoint,
             embedding_deployment=embedding_deployment,
             dimensions=args.dimensions,
-            skills_function_url=skills_function_url,
-            skills_function_key=skills_function_key,
             max_chunk_chars=args.max_chunk_chars,
             overlap_chars=args.overlap_chars,
         )

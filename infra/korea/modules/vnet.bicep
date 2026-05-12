@@ -1,6 +1,6 @@
 // ============================================
 // Virtual Network + Private DNS Zones
-// Sweden Central - Private Networking
+// Korea Central - Private Networking
 // ============================================
 
 @description('배포 리전')
@@ -11,10 +11,9 @@ param suffix string
 
 var vnetName = 'vnet-ragi-${take(suffix, 8)}'
 var nsgName = 'nsg-pep-ragi-${take(suffix, 8)}'
+var jumpSubnetName = 'snet-jump'
 var pepSubnetName = 'snet-pep'
 var funcSubnetName = 'snet-func'
-// 기존 환경과의 호환을 위해 jump 서브넷 이름 유지
-var jumpvmSubnetName = 'snet-jump'
 
 // ── NSG (Private Endpoint 서브넷용) ──
 resource nsg 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
@@ -35,6 +34,13 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
       addressPrefixes: ['10.0.0.0/16']
     }
     subnets: [
+      {
+        // JumpVM 서브넷 - AI Search 등 Private Endpoint에 접근하기 위한 관리자 VM
+        name: jumpSubnetName
+        properties: {
+          addressPrefix: '10.0.0.0/24'
+        }
+      }
       {
         name: pepSubnetName
         properties: {
@@ -59,13 +65,6 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
               }
             }
           ]
-        }
-      }
-      {
-        // JumpVM 서브넷 - AI Search 등 Private Endpoint에 접근하기 위한 관리자 VM
-        name: jumpvmSubnetName
-        properties: {
-          addressPrefix: '10.0.3.0/24'
         }
       }
     ]
@@ -197,7 +196,7 @@ output vnetId string = vnet.id
 output vnetName string = vnet.name
 output pepSubnetId string = '${vnet.id}/subnets/${pepSubnetName}'
 output funcSubnetId string = '${vnet.id}/subnets/${funcSubnetName}'
-output jumpvmSubnetId string = '${vnet.id}/subnets/${jumpvmSubnetName}'
+output jumpSubnetId string = '${vnet.id}/subnets/${jumpSubnetName}'
 output blobDnsZoneId string = blobDnsZone.id
 output searchDnsZoneId string = searchDnsZone.id
 output cogServicesDnsZoneId string = cogServicesDnsZone.id

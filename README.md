@@ -107,8 +107,8 @@ az login
 # Sweden Central에 배포 (~10분 소요)
 az deployment sub create \
     --location swedencentral \
-    --template-file infra/main.bicep \
-    --parameters infra/parameters/main.bicepparam
+    --template-file infra/sweden/main.bicep \
+    --parameters infra/sweden/parameters/main.bicepparam
 ```
 
 ### 3. Shared Private Link 승인
@@ -175,17 +175,30 @@ uv run python -m src.crawler.law_crawler
 
 ```
 azure-rag-indexing-lab/
-├── infra/                           # Bicep 인프라 템플릿
-│   ├── main.bicep                   # 메인 (Sweden Central, Private Network)
-│   ├── modules/
-│   │   ├── vnet.bicep               # VNet + Private DNS Zones  [NEW]
-│   │   ├── private-endpoints.bicep  # 모든 서비스 Private Endpoints  [NEW]
-│   │   ├── storage.bicep            # Storage Account (Private)
-│   │   ├── openai.bicep             # AI Services (Private)
-│   │   ├── ai-search.bicep          # AI Search + Shared Private Links
-│   │   └── doc-intelligence.bicep  # Document Intelligence (Private)
-│   └── parameters/
-│       └── main.bicepparam          # Sweden Central 파라미터
+├── infra/                           # Bicep 인프라 템플릿 (리전별 분리)
+│   ├── sweden/                      # Sweden Central 배포
+│   │   ├── main.bicep               # 메인 (Sweden Central, Private Network)
+│   │   ├── modules/
+│   │   │   ├── vnet.bicep            # VNet + Private DNS Zones
+│   │   │   ├── private-endpoints.bicep # 모든 서비스 Private Endpoints
+│   │   │   ├── storage.bicep         # Storage Account (Private)
+│   │   │   ├── openai.bicep          # AI Services (Private)
+│   │   │   ├── ai-search.bicep       # AI Search + Shared Private Links
+│   │   │   └── doc-intelligence.bicep # Document Intelligence (Private)
+│   │   └── parameters/
+│   │       └── main.bicepparam       # Sweden Central 파라미터
+│   │
+│   └── korea/                       # Korea Central 배포
+│       ├── main.bicep               # 메인 (Korea Central + East US 2 DI)
+│       ├── modules/
+│       │   ├── vnet.bicep            # VNet + Private DNS Zones
+│       │   ├── private-endpoints.bicep # PE (Cross-Region DI PE 포함)
+│       │   ├── storage.bicep         # Storage Account (Private)
+│       │   ├── openai.bicep          # AI Services (Private)
+│       │   ├── ai-search.bicep       # AI Search + Shared Private Links
+│       │   └── doc-intelligence.bicep # Document Intelligence (East US 2)
+│       └── parameters/
+│           └── main.bicepparam       # Korea Central 파라미터
 │
 ├── scripts/
 │   ├── setup_ai_search_pipeline.py             # 기존 법령 텍스트 인덱서/스킬셋 설정
