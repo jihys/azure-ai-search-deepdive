@@ -1,0 +1,10 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_OPENAI_ENDPOINT": "https://your-openai.openai.azure.com",
+    "AZURE_OPENAI_GPT54_DEPLOYMENT": "gpt-5.4",
+    "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT": "https://your-doc-intel.cognitiveservices.azure.com"
+  }
+}

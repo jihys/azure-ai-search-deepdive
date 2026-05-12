@@ -1,0 +1,52 @@
+{
+    "managedApiConnections": {
+        "azureblob": {
+            "api": {
+                "id": "/subscriptions/@{appsetting('AZURE_SUBSCRIPTION_ID')}/providers/Microsoft.Web/locations/koreacentral/managedApis/azureblob"
+            },
+            "connection": {
+                "id": "/subscriptions/@{appsetting('AZURE_SUBSCRIPTION_ID')}/resourceGroups/@{appsetting('AZURE_RESOURCE_GROUP')}/providers/Microsoft.Web/connections/azureblob"
+            },
+            "connectionRuntimeUrl": "",
+            "authentication": {
+                "type": "ManagedServiceIdentity"
+            }
+        },
+        "azureaisearch": {
+            "api": {
+                "id": "/subscriptions/@{appsetting('AZURE_SUBSCRIPTION_ID')}/providers/Microsoft.Web/locations/koreacentral/managedApis/azureaisearch"
+            },
+            "connection": {
+                "id": "/subscriptions/@{appsetting('AZURE_SUBSCRIPTION_ID')}/resourceGroups/@{appsetting('AZURE_RESOURCE_GROUP')}/providers/Microsoft.Web/connections/azureaisearch"
+            },
+            "connectionRuntimeUrl": "",
+            "authentication": {
+                "type": "ManagedServiceIdentity"
+            }
+        }
+    },
+    "serviceProviderConnections": {
+        "openai": {
+            "parameterValues": {
+                "openAIEndpoint": "@appsetting('AZURE_OPENAI_ENDPOINT')",
+                "openAIKey": "@appsetting('AZURE_OPENAI_KEY')"
+            },
+            "parameterSetName": "KeyAndEndpointConnection",
+            "serviceProvider": {
+                "id": "/serviceProviders/openai"
+            },
+            "displayName": "Azure AI Services - OpenAI"
+        },
+        "documentIntelligence": {
+            "parameterValues": {
+                "documentIntelligenceEndpoint": "@appsetting('AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT')",
+                "documentIntelligenceKey": "@appsetting('AZURE_DOCUMENT_INTELLIGENCE_KEY')"
+            },
+            "parameterSetName": "KeyAndEndpointConnection",
+            "serviceProvider": {
+                "id": "/serviceProviders/documentIntelligence"
+            },
+            "displayName": "Document Intelligence"
+        }
+    }
+}

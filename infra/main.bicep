@@ -1,0 +1,252 @@
+// ============================================
+// Azure RAG Indexing Lab - Main Bicep Template
+// Region: Sweden Central (swedencentral)
+// Network: Full Private (VNet + Private Endpoints)
+// Pipeline: AI Search Native Indexer + Skillset
+//           (Logic Apps 대신 AI Search Skills 사용)
+// ============================================
+
+targetScope = 'subscription'
+
+@description('리소스 그룹 이름')
+param resourceGroupName string = 'rg-rag-indexing-lab-swc'
+
+@description('배포 리전 - Sweden Central (Document Intelligence 지원)')
+param location string = 'swedencentral'
+
+@description('리소스 이름 접미사 (고유성 보장)')
+param suffix string = uniqueString(subscription().subscriptionId, resourceGroupName)
+
+@description('Azure OpenAI embedding 모델 배포명')
+param embeddingDeploymentName string = 'text-embedding-3-large'
+
+@description('Azure OpenAI GPT-5.4 배포명 (RAG 질의응답용)')
+param gpt54DeploymentName string = 'gpt-5.4'
+
+@description('GPT-5.4 모델 버전 — Azure Portal에서 확인 후 입력')
+param gpt54ModelVersion string
+
+@description('AI Search SKU')
+@allowed(['basic', 'standard', 'standard2'])
+param searchSku string = 'basic'
+
+@description('Storage Account 컨테이너 이름')
+param blobContainerName string = 'raw-documents'
+
+@description('크롤러가 수집할 법령 건수')
+param crawlerLimit int = 10
+
+@description('JumpVM 관리자 계정명')
+param jumpvmAdminUsername string = 'azureadmin'
+
+@description('JumpVM 관리자 비밀번호')
+@secure()
+param jumpvmAdminPassword string
+
+@description('JumpVM Entra ID 로그인을 허용할 사용자 Object ID 목록')
+param jumpvmEntraUserObjectIds array = []
+
+// ============================================
+// Resource Group
+// ============================================
+resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
+  name: resourceGroupName
+  location: location
+  tags: {
+    project: 'rag-indexing-lab'
+    environment: 'lab'
+    region: 'swedencentral'
+  }
+}
+
+// ============================================
+// Virtual Network + Private DNS Zones
+// ============================================
+module vnet 'modules/vnet.bicep' = {
+  scope: rg
+  name: 'vnet-deployment'
+  params: {
+    location: location
+    suffix: suffix
+  }
+}
+
+// ============================================
+// Storage Account (Private)
+// ============================================
+module storage 'modules/storage.bicep' = {
+  scope: rg
+  name: 'storage-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    containerName: blobContainerName
+  }
+}
+
+// ============================================
+// Azure AI Services (OpenAI) (Private)
+// ============================================
+module openai 'modules/openai.bicep' = {
+  scope: rg
+  name: 'openai-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    embeddingDeploymentName: embeddingDeploymentName
+    gpt54DeploymentName: gpt54DeploymentName
+    gpt54ModelVersion: gpt54ModelVersion
+  }
+}
+
+// ============================================
+// Document Intelligence (Private)
+// ============================================
+module docIntelligence 'modules/doc-intelligence.bicep' = {
+  scope: rg
+  name: 'doc-intelligence-deployment'
+  params: {
+    location: location
+    suffix: suffix
+  }
+}
+
+// ============================================
+// Azure AI Search + Shared Private Links (아웃바운드)
+// AI Search Indexer + Skillset이 Storage/AI Services에 접근
+// Logic Apps 인덱싱 워크플로우를 AI Search 네이티브로 대체
+// ============================================
+module aiSearch 'modules/ai-search.bicep' = {
+  scope: rg
+  name: 'ai-search-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    sku: searchSku
+    storageAccountId: storage.outputs.storageAccountId
+    aiServicesId: openai.outputs.accountId
+  }
+}
+
+// ============================================
+// Azure Function App (크롤러) - EP1 + VNet Integration
+// Python 크롤러를 Azure에서 실행 (로컬 실행 대체)
+// snet-func → VNet → Storage PE로 아웃바운드 접근
+// ============================================
+module functionCrawler 'modules/function-crawler.bicep' = {
+  scope: rg
+  name: 'function-crawler-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    funcSubnetId: vnet.outputs.funcSubnetId
+    storageAccountName: storage.outputs.storageAccountName
+    storageAccountId: storage.outputs.storageAccountId
+    blobContainerName: blobContainerName
+    crawlerLimit: crawlerLimit
+  }
+}
+
+// ============================================
+// Logic App (Consumption) - 크롤 스케줄러
+// 매일 21:00 UTC (= 06:00 KST) → Function 호출
+// ============================================
+module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
+  scope: rg
+  name: 'logic-app-crawl-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    crawlFunctionUrl: functionCrawler.outputs.crawlTriggerUrl
+    crawlerLimit: crawlerLimit
+  }
+}
+
+// ============================================
+// Azure AI Foundry Hub + Project (Private AI Search 연결)
+// Managed Network: AllowInternetOutbound
+// Outbound PE: AI Search + AI Services
+// ============================================
+module foundryHub 'modules/foundry-hub.bicep' = {
+  scope: rg
+  name: 'foundry-hub-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    storageAccountId: storage.outputs.storageAccountId
+    storageAccountName: storage.outputs.storageAccountName
+    searchServiceId: aiSearch.outputs.searchServiceId
+    searchServiceName: aiSearch.outputs.searchServiceName
+    searchEndpoint: aiSearch.outputs.endpoint
+    aiServicesId: openai.outputs.accountId
+    aiServicesName: openai.outputs.accountName
+    aiServicesEndpoint: openai.outputs.endpoint
+  }
+}
+
+// ============================================
+// Private Endpoints (인바운드 - VNet 내부 접근)
+// ============================================
+module privateEndpoints 'modules/private-endpoints.bicep' = {
+  scope: rg
+  name: 'private-endpoints-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    pepSubnetId: vnet.outputs.pepSubnetId
+    storageAccountId: storage.outputs.storageAccountId
+    searchServiceId: aiSearch.outputs.searchServiceId
+    aiServicesId: openai.outputs.accountId
+    docIntelligenceId: docIntelligence.outputs.docIntelligenceId
+    hubId: foundryHub.outputs.hubId
+    keyVaultId: foundryHub.outputs.keyVaultId
+    blobDnsZoneId: vnet.outputs.blobDnsZoneId
+    searchDnsZoneId: vnet.outputs.searchDnsZoneId
+    cogServicesDnsZoneId: vnet.outputs.cogServicesDnsZoneId
+    openaiDnsZoneId: vnet.outputs.openaiDnsZoneId
+    azuremlDnsZoneId: vnet.outputs.azuremlDnsZoneId
+    notebooksDnsZoneId: vnet.outputs.notebooksDnsZoneId
+    vaultDnsZoneId: vnet.outputs.vaultDnsZoneId
+  }
+}
+
+// ============================================
+// JumpVM - AI Search / Private Endpoint 접근용 관리 VM
+// publicNetworkAccess=Disabled 서비스에 VNet 내부에서만 접근
+// snet-jump (10.0.3.0/24) → snet-pep → Private Endpoint → Service
+// ============================================
+module jumpvm 'modules/jumpvm.bicep' = {
+  scope: rg
+  name: 'jumpvm-deployment'
+  params: {
+    location: location
+    jumpvmSubnetId: vnet.outputs.jumpvmSubnetId
+    adminUsername: jumpvmAdminUsername
+    adminPassword: jumpvmAdminPassword
+    entraUserObjectIds: jumpvmEntraUserObjectIds
+  }
+}
+
+// ============================================
+// Outputs
+// ============================================
+output resourceGroupName string = rg.name
+output location string = location
+output vnetName string = vnet.outputs.vnetName
+output storageAccountName string = storage.outputs.storageAccountName
+output storageAccountBlobEndpoint string = storage.outputs.blobEndpoint
+output openaiEndpoint string = openai.outputs.endpoint
+output openaiAccountName string = openai.outputs.accountName
+output gpt54DeploymentName string = openai.outputs.gpt54DeploymentName
+output aiSearchEndpoint string = aiSearch.outputs.endpoint
+output aiSearchName string = aiSearch.outputs.searchServiceName
+output docIntelligenceEndpoint string = docIntelligence.outputs.endpoint
+output aiSearchPrincipalId string = aiSearch.outputs.searchServicePrincipalId
+output crawlFunctionUrl string = functionCrawler.outputs.crawlTriggerUrl
+output crawlFunctionName string = functionCrawler.outputs.funcAppName
+output crawlLogicAppName string = logicAppCrawl.outputs.crawlWorkflowName
+output jumpvmName string = jumpvm.outputs.vmName
+output jumpvmPublicIp string = jumpvm.outputs.publicIpAddress
+output foundryHubName string = foundryHub.outputs.hubName
+output foundryProjectName string = foundryHub.outputs.projectName
+output foundryKeyVaultName string = foundryHub.outputs.keyVaultName

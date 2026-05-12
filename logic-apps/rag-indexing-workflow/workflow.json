@@ -1,0 +1,274 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "When_a_blob_is_added_or_modified": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/v2/datasets/@{encodeURIComponent('default')}/triggers/batch/onupdatedfile",
+                    "queries": {
+                        "folderId": "/raw-documents",
+                        "maxFileCount": 10
+                    }
+                },
+                "recurrence": {
+                    "frequency": "Minute",
+                    "interval": 3
+                },
+                "splitOn": "@triggerBody()",
+                "metadata": {
+                    "description": "raw-documents 컨테이너에 새 파일이 업로드되면 자동 트리거 (변경분/신규분만)"
+                }
+            }
+        },
+        "actions": {
+            "Get_Blob_Content": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/v2/datasets/@{encodeURIComponent('default')}/files/@{encodeURIComponent(triggerBody()?['Path'])}/content",
+                    "queries": {
+                        "inferContentType": true
+                    }
+                },
+                "runAfter": {}
+            },
+            "Analyze_Document_with_DI": {
+                "type": "ServiceProvider",
+                "inputs": {
+                    "serviceProviderConfiguration": {
+                        "connectionName": "documentIntelligence",
+                        "operationId": "analyzeDocument",
+                        "serviceProviderId": "/serviceProviders/documentIntelligence"
+                    },
+                    "parameters": {
+                        "modelId": "prebuilt-layout",
+                        "fileContent": "@body('Get_Blob_Content')",
+                        "outputContentFormat": "markdown",
+                        "features": ["tables"]
+                    }
+                },
+                "runAfter": {
+                    "Get_Blob_Content": ["Succeeded"]
+                },
+                "metadata": {
+                    "description": "Document Intelligence Layout 분석 → Markdown 변환"
+                }
+            },
+            "Initialize_Chunks_Array": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "chunks",
+                            "type": "array",
+                            "value": []
+                        }
+                    ]
+                },
+                "runAfter": {}
+            },
+            "Initialize_ChunkIndex": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "chunkIndex",
+                            "type": "integer",
+                            "value": 0
+                        }
+                    ]
+                },
+                "runAfter": {}
+            },
+            "Split_Into_Paragraphs": {
+                "type": "Compose",
+                "inputs": "@split(body('Analyze_Document_with_DI')?['content'], '\n\n')",
+                "runAfter": {
+                    "Analyze_Document_with_DI": ["Succeeded"],
+                    "Initialize_Chunks_Array": ["Succeeded"],
+                    "Initialize_ChunkIndex": ["Succeeded"]
+                },
+                "metadata": {
+                    "description": "DI 마크다운 출력을 단락 경계(\\n\\n)로 분할"
+                }
+            },
+            "Build_Chunks": {
+                "type": "Foreach",
+                "foreach": "@outputs('Split_Into_Paragraphs')",
+                "actions": {
+                    "Check_Paragraph_Length": {
+                        "type": "If",
+                        "expression": {
+                            "and": [
+                                {
+                                    "greater": [
+                                        "@length(items('Build_Chunks'))",
+                                        20
+                                    ]
+                                }
+                            ]
+                        },
+                        "actions": {
+                            "Append_Chunk": {
+                                "type": "AppendToArrayVariable",
+                                "inputs": {
+                                    "name": "chunks",
+                                    "value": {
+                                        "text": "@items('Build_Chunks')",
+                                        "index": "@variables('chunkIndex')"
+                                    }
+                                }
+                            },
+                            "Increment_Index": {
+                                "type": "IncrementVariable",
+                                "inputs": {
+                                    "name": "chunkIndex",
+                                    "value": 1
+                                },
+                                "runAfter": {
+                                    "Append_Chunk": ["Succeeded"]
+                                }
+                            }
+                        },
+                        "else": {
+                            "actions": {}
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Split_Into_Paragraphs": ["Succeeded"]
+                },
+                "runtimeConfiguration": {
+                    "concurrency": {
+                        "repetitions": 1
+                    }
+                },
+                "metadata": {
+                    "description": "20자 이상 단락만 청크로 수집 (순차 처리로 인덱스 보장)"
+                }
+            },
+            "Process_Each_Chunk": {
+                "type": "Foreach",
+                "foreach": "@variables('chunks')",
+                "actions": {
+                    "Generate_Embedding": {
+                        "type": "ServiceProvider",
+                        "inputs": {
+                            "serviceProviderConfiguration": {
+                                "connectionName": "openai",
+                                "operationId": "getEmbeddings",
+                                "serviceProviderId": "/serviceProviders/openai"
+                            },
+                            "parameters": {
+                                "deploymentId": "text-embedding-3-large",
+                                "input": "@items('Process_Each_Chunk')?['text']"
+                            }
+                        },
+                        "runAfter": {}
+                    },
+                    "Index_to_AI_Search": {
+                        "type": "Http",
+                        "inputs": {
+                            "method": "POST",
+                            "uri": "@{appsetting('AZURE_SEARCH_SERVICE_ENDPOINT')}/indexes/law-documents-index/docs/index?api-version=2024-07-01",
+                            "headers": {
+                                "Content-Type": "application/json",
+                                "api-key": "@{appsetting('AZURE_SEARCH_ADMIN_KEY')}"
+                            },
+                            "body": {
+                                "value": [
+                                    {
+                                        "@@search.action": "mergeOrUpload",
+                                        "id": "@{concat(replace(replace(triggerBody()?['Name'], '.', '-'), ' ', '-'), '-', items('Process_Each_Chunk')?['index'])}",
+                                        "documentName": "@{triggerBody()?['Name']}",
+                                        "content": "@{items('Process_Each_Chunk')?['text']}",
+                                        "embeddings": "@body('Generate_Embedding')?['embeddings']",
+                                        "crawledDate": "@{utcNow()}",
+                                        "sourceUrl": "@{triggerBody()?['Path']}",
+                                        "category": "법률문서",
+                                        "chunkIndex": "@items('Process_Each_Chunk')?['index']"
+                                    }
+                                ]
+                            }
+                        },
+                        "runAfter": {
+                            "Generate_Embedding": ["Succeeded"]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Build_Chunks": ["Succeeded"]
+                },
+                "runtimeConfiguration": {
+                    "concurrency": {
+                        "repetitions": 5
+                    }
+                },
+                "metadata": {
+                    "description": "각 청크: Embedding 생성 → AI Search 인덱싱 (5개 병렬)"
+                }
+            },
+            "Move_to_Processed": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "path": "/v2/datasets/@{encodeURIComponent('default')}/copyFile",
+                    "queries": {
+                        "source": "@triggerBody()?['Path']",
+                        "destination": "/processed-documents/@{triggerBody()?['Name']}",
+                        "overwrite": true
+                    }
+                },
+                "runAfter": {
+                    "Process_Each_Chunk": ["Succeeded"]
+                },
+                "metadata": {
+                    "description": "처리 완료 후 processed-documents로 이동"
+                }
+            },
+            "Delete_Original": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                        }
+                    },
+                    "method": "delete",
+                    "path": "/v2/datasets/@{encodeURIComponent('default')}/files/@{encodeURIComponent(triggerBody()?['Path'])}"
+                },
+                "runAfter": {
+                    "Move_to_Processed": ["Succeeded"]
+                },
+                "metadata": {
+                    "description": "원본 삭제 (processed에 복사 완료 후)"
+                }
+            }
+        },
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        }
+    },
+    "kind": "Stateful"
+}
