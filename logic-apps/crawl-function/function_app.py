@@ -61,7 +61,7 @@ _CRAWLERS = {
 
 @app.function_name(name="crawl")
 @app.route(route="crawl", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def crawl_trigger(req: func.HttpRequest) -> func.HttpResponse:
+def crawl(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Crawl function triggered")
     start = datetime.now(timezone.utc)
 

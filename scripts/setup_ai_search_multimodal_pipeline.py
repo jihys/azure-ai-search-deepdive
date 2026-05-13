@@ -185,9 +185,10 @@ def create_basic_skillset(
             {
                 "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
                 "name": "markdown-split-skill",
-                "description": "Native Markdown 헤더 기반 분할 (AI Search 내장)",
+                "description": "Native pages 분할 (AI Search 내장)",
                 "context": "/document",
-                "textSplitMode": "markdown",
+                # 'markdown' 모드는 현재 사용 중인 API 버전에서 지원되지 않아 pages로 고정
+                "textSplitMode": "pages",
                 "maximumPageLength": max_chunk_chars,
                 "pageOverlapLength": overlap_chars,
                 "inputs": [
@@ -236,7 +237,7 @@ def create_basic_skillset(
 
     delete_if_exists(client, f"/skillsets/{skillset_name}")
     client.request("PUT", f"/skillsets/{skillset_name}", skillset_payload)
-    print(f"    ✓ created (DI Layout → Native SplitSkill[markdown] → Embedding)")
+    print(f"    ✓ created (DI Layout → Native SplitSkill[pages] → Embedding)")
 
 
 def create_verbalized_skillset(

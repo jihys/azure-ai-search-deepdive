@@ -38,7 +38,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
         // JumpVM 서브넷 - AI Search 등 Private Endpoint에 접근하기 위한 관리자 VM
         name: jumpSubnetName
         properties: {
-          addressPrefix: '10.0.0.0/24'
+          addressPrefix: '10.0.3.0/24'
         }
       }
       {

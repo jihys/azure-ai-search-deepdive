@@ -1,471 +1,242 @@
-# Azure AI Search Deep Dive Lab - 실행 계획서
+# Azure AI Search Deep Dive Lab - 통합 실행 계획서 (2026-05-13)
 
-## 프로젝트 개요
+## 1. 문서 목적
 
-**목표**: Azure AI Search의 핵심 기능을 **2개 실제 시나리오**로 데모하는 Hands-on Lab
+이 문서는 현재 저장소 구조와 실제 운영 상태를 기준으로, 아래 2개 시나리오를 일관된 방식으로 실행하기 위한 최신 기준 계획이다.
 
-| | 시나리오 A | 시나리오 B |
-|--|------------|------------|
-| **이름** | 법령 문서 인덱싱 | 멀티모달 PDF/PPTX 인덱싱 |
-| **데이터** | law.go.kr 크롤링 (자동) | PDF/PPTX 수동 업로드 |
-| **Stage 1** | Logic Apps 오케스트레이션 (Crawl + Data Integration) | Blob 업로드만 |
-| **Stage 2** | AI Search Native Skillset (Text Split + Embedding) | Native Skillset vs Custom+Native Skillset 비교 |
-| **인덱스** | 4개 (prec / detc / expc / admrul) | 2개 (native-index / custom-index) |
-| **데모 포인트** | 증분 크롤링, High Water Mark, 멀티 인덱스 Cross-Search | Native vs GPT-5.4 Verbalization 검색 품질 비교 |
+- 시나리오 A: 법령/판례 데이터 크롤링 + 전처리 + 검색
+- 시나리오 B: 멀티모달(PDF/PPTX) 데이터 인덱싱 + 검색
 
-**핵심 아키텍처** — 2단계 파이프라인:
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Stage 1: CRAWLING + DATA INTEGRATION  (Logic Apps 관장)                 │
-│                                                                         │
-│  law.go.kr ──→ Crawl Function ──→ raw-documents/ (Blob)                 │
-│                                       │                                 │
-│                              Data Integration Function                  │
-│                              (메타데이터 정규화, 포맷 통일)              │
-│                                       │                                 │
-│                              processed-documents/ (Blob)                │
-└───────────────────────────────────────┬─────────────────────────────────┘
-                                        │
-┌───────────────────────────────────────▼─────────────────────────────────┐
-│ Stage 2: SPLIT + EMBEDDING + INGEST  (AI Search 관장)                   │
-│                                                                         │
-│  processed-documents/ ──→ AI Search Indexer                             │
-│                              │                                          │
-│                     Skillset (Native + Custom)                          │
-│                     ├─ [Native] Text Split Skill                        │
-│                     ├─ [Native/Custom] Embedding Skill                  │
-│                     └─ [Custom] Document Intelligence Skill (멀티모달)  │
-│                              │                                          │
-│                     AI Search Index (벡터 + 시맨틱 하이브리드)          │
-└─────────────────────────────────────────────────────────────────────────┘
+## 2. 현재 기준 아키텍처
+
+### 2.1 전체 구조
+
+- Stage 1 (데이터 수집/정규화): Logic Apps + Azure Functions
+- Stage 2 (인덱싱/검색): Azure AI Search Indexer + Skillset
+
+```text
+[External Sources / Files]
+    |
+    +--> (A) law.go.kr -> Crawl Function -> raw/ -> Preprocess Function -> processed/
+    |
+    +--> (B) PDF/PPTX Upload -> raw/
+
+[Blob Storage: data lake role]
+    |
+    +--> AI Search Data Source
+            |
+            +--> Skillset (Text Split, Embedding, 필요 시 Custom)
+                    |
+                    +--> Index (Vector + Semantic + Hybrid)
 ```
 
-**총 인덱스**: 법령 텍스트 4개 + 멀티모달 2개 = **6개**
+### 2.2 시나리오 A 논리 경계
 
----
+- Crawling pipeline은 별도 로지컬 영역으로 분리한다.
+- Logic App은 다음 순서를 오케스트레이션한다.
+1. `crawl-function` 호출
+2. `preprocess-function` 병렬 호출
+3. 상태 집계 및 실패 처리
 
-## Phase 1: 인프라 배포 (Bicep)
+### 2.3 시나리오 B 논리 경계
 
-### 배포할 리소스 (Korea Central)
-| 리소스 | 이름 패턴 | 용도 |
-|--------|-----------|------|
-| Resource Group | `rg-rag-indexing-lab` | 전체 리소스 그룹 |
-| Storage Account | `stragindexinglab{suffix}` | Blob Storage - 크롤링 데이터 저장 |
-| Azure OpenAI | `aoai-rag-indexing-lab` | text-embedding-3-large 모델 배포 |
-| Azure AI Search | `search-rag-indexing-lab` | 벡터 인덱스 및 검색 |
-| Document Intelligence | `di-rag-indexing-lab` | 문서 전처리 (OCR, Layout) |
-| Logic App (Workflow) | `logic-rag-indexing-lab` | 데이터 전처리 워크플로우 |
+- 수동 업로드 데이터(PDF/PPTX)를 기준으로 Native 파이프라인과 Custom 파이프라인을 비교한다.
+- Custom 파이프라인은 필요 시 문서 변환/보강 단계를 추가한다.
 
-### 배포 방법
-```bash
-# 1. Resource Group 생성
-az group create --name rg-rag-indexing-lab --location koreacentral
+## 3. 저장소 기준 컴포넌트 맵
 
-# 2. Bicep 배포
-az deployment group create \
-  --resource-group rg-rag-indexing-lab \
-  --template-file infra/sweden/main.bicep \
-  --parameters infra/sweden/parameters/main.bicepparam
+- 인프라
+  - `infra/sweden/main.bicep`
+  - `infra/sweden/modules/*`
+  - `infra/korea/main.bicep`
+  - `infra/korea/modules/*`
+- 워크플로우
+  - `logic-apps/crawl-workflow/workflow.json`
+  - `logic-apps/rag-indexing-workflow/workflow.json`
+  - `logic-apps/crawl-preprocess-workflow/workflow.json`
+- 함수 앱 코드
+  - `logic-apps/crawl-function/*`
+  - `logic-apps/preprocess-function/*`
+- 검색 파이프라인 코드
+  - `scripts/setup_ai_search_pipeline.py`
+  - `scripts/setup_ai_search_multimodal_pipeline.py`
+  - `src/search/*`
+- 노트북
+  - `notebooks/01-infra-deployment.ipynb`
+  - `notebooks/02-data-crawling.ipynb`
+  - `notebooks/03-search-and-query.ipynb`
+  - `notebooks/04-legal-multi-index.ipynb`
+  - `notebooks/05-multi-index-search.ipynb` (정리/퇴역 대상)
+  - `notebooks/06-multimodal-search.ipynb` (시나리오 B 별도 단계)
+
+## 4. 운영 기준 리소스 (Sweden)
+
+현재 운영 기준은 Sweden 환경을 기본으로 한다.
+
+- Resource Group: `rg-rag-indexing-lab-swc`
+- Crawl Function App: `func-crawl-ragi-dyn6dtfu`
+- Preprocess Function App: `func-preprocess-ragi-dyn6dtfu`
+- Logic App: `logic-crawl-ragi-dyn6dtfu`
+- Storage Account: `stragidyn6dtfun6`
+
+주의:
+- 함수 앱은 Python 3.11 런타임 기준으로 유지한다.
+- 로컬 Python 버전과 함수 런타임 불일치는 경고만 발생할 수 있으나, 배포는 Remote Build를 기준으로 수행한다.
+
+## 5. 실행 원칙
+
+1. 배포명 대신 Azure 서비스명을 문서/다이어그램에 표기한다.
+2. 이미 배포된 리소스는 기본적으로 재생성하지 않고, 필요한 경우에만 최소 범위로 재배포한다.
+3. Stage 1 실패 시 Stage 2를 실행하지 않는다.
+4. 파일 경로, 워크플로우명, 함수 엔드포인트는 실제 배포 상태와 일치해야 한다.
+
+## 6. 단계별 실행 계획
+
+### Phase A. 인프라 검증/배포
+
+목표:
+- 인프라 모듈 상태를 검증하고, 필요한 컴포넌트만 선택적으로 배포한다.
+
+작업:
+1. `infra/sweden/main.bicep` 기준 파라미터 확인
+2. Function 관련 모듈 상태 확인
+3. Logic App 관련 모듈 상태 확인
+4. 변경분만 배포
+
+완료 기준:
+- Function/Logic App/Storage/Search/OpenAI 리소스 조회 성공
+- 필수 App Settings 및 Managed Identity 권한 검증 완료
+
+### Phase B. Stage 1 파이프라인 정상화
+
+목표:
+- `crawl -> preprocess` 연계가 엔드투엔드로 성공한다.
+
+작업:
+1. `logic-apps/crawl-function` Remote Build 배포
+2. `logic-apps/preprocess-function` Remote Build 배포
+3. Function 엔드포인트 응답 검증
+4. Logic App 수동 실행
+5. 액션별 결과 검증(특히 crawl 호출 단계)
+
+완료 기준:
+- `/api/crawl`가 NotFound(404)가 아니어야 함
+- `/api/preprocess` 호출 성공
+- Logic App 실행에서 crawl/preprocess 액션이 모두 성공
+
+### Phase C. Stage 2 인덱싱 파이프라인 검증
+
+목표:
+- 데이터소스/스킬셋/인덱서/인덱스 구성의 유효성을 보장한다.
+
+작업:
+1. 법령 4개 인덱스 스키마 검증
+2. 인덱서 실행 및 문서 유입 확인
+3. 시맨틱/벡터 검색 품질 점검
+4. 멀티모달 Native vs Custom 비교 검증
+
+완료 기준:
+- 목표 인덱스에 문서가 정상 적재
+- 검색 쿼리 결과가 재현 가능
+
+### Phase D. 노트북 정리 (01~04 우선 기준)
+
+현재 기준 노트북 정리는 01~04를 우선 범위로 한다.
+
+현재 상태 요약:
+1. `01-infra-deployment.ipynb`: 일부 셀 실행됨, 후반부 오류 실행 이력 존재
+2. `02-data-crawling.ipynb`: 미실행
+3. `03-search-and-query.ipynb`: 미실행
+4. `04-legal-multi-index.ipynb`: 미실행
+
+실행 항목:
+1. `01-infra-deployment.ipynb` 실행/오류 셀 정리 및 재실행 동선 고정
+2. `02-data-crawling.ipynb`를 Stage 1 검증 흐름에 맞게 정리
+3. `03-search-and-query.ipynb`를 단일 검색/질의 검증 흐름으로 정리
+4. `04-legal-multi-index.ipynb`를 멀티 인덱스 통합 검증 흐름으로 정리
+5. 01~04 전체 노트북 에러 검증
+
+완료 기준:
+- 01~04 각 노트북의 목적/입출력/검증 포인트가 명확히 분리됨
+- 01~04 순차 실행 시 치명적 실행 에러 없음
+- `05-multi-index-search.ipynb`는 중복 여부 검토 후 축소 또는 퇴역 결정
+
+## 7. 워크플로우/함수 인터페이스 계약
+
+### 7.1 Crawl Function
+
+- Endpoint: `POST /api/crawl`
+- 입력 최소 예시:
+
+```json
+{
+  "source": "all",
+  "triggered_by": "logic-app"
+}
 ```
 
-### 파일 구조
-```
-infra/
-├── sweden/                       # Sweden Central 배포
-│   ├── main.bicep                # 메인 오케스트레이션
-│   ├── modules/
-│   │   ├── storage.bicep         # Storage Account + Blob Container
-│   │   ├── openai.bicep          # Azure OpenAI + Embedding 모델 배포
-│   │   ├── ai-search.bicep       # Azure AI Search 서비스
-│   │   ├── doc-intelligence.bicep # Document Intelligence
-│   │   └── ...                   # 기타 모듈
-│   └── parameters/
-│       └── main.bicepparam       # Sweden Central 파라미터
-│
-└── korea/                        # Korea Central 배포
-    ├── main.bicep                # 메인 (Korea Central + East US 2 DI)
-    ├── modules/
-    │   ├── storage.bicep         # Storage Account + Blob Container
-    │   ├── openai.bicep          # Azure OpenAI + Embedding 모델 배포
-    │   ├── ai-search.bicep       # Azure AI Search 서비스
-    │   ├── doc-intelligence.bicep # Document Intelligence (East US 2)
-    │   └── ...                   # 기타 모듈
-    └── parameters/
-        └── main.bicepparam       # Korea Central 파라미터
+- 출력 요구사항:
+  - 실행 성공/실패 상태
+  - 소스별 처리 건수 또는 요약
+
+### 7.2 Preprocess Function
+
+- Endpoint: `POST /api/preprocess`
+- 입력 최소 예시:
+
+```json
+{
+  "source": "prec",
+  "crawl_date": "2026-04-19",
+  "triggered_by": "logic-app"
+}
 ```
 
----
+- 출력 요구사항:
+  - 처리 파일 수
+  - 실패 목록(있을 경우)
 
-## Phase 2: Logic Apps 워크플로우 배포
+## 8. 검증 체크리스트
 
-> **역할**: Stage 1 전체 오케스트레이션 — 크롤링 + 데이터 통합(전처리)만 담당  
-> Split/Embedding/Ingest는 AI Search가 자체적으로 처리 (Stage 2)
+### 8.1 배포 검증
 
-### 기본 1개의 워크플로우
-1. **crawl-preprocess-workflow** (메인, 매일 06:00 KST)
-   - Step 1: law.go.kr 크롤링 (모든 소스 병렬) → raw-documents/
-   - Step 2: 데이터 통합 (4개 소스 병렬: prec, detc, expc, admrul)
-     - 메타데이터 정규화, 소스별 포맷 통일
-     - → processed-documents/ 저장 (AI Search Indexer 입력)
-   - Step 3: 결과 수집 및 alert
+- Function App 2종 `Running`
+- Logic App definition 최신 상태
+- Storage 컨테이너 접근 권한 정상
 
-> `crawl-workflow`, `rag-indexing-workflow`는 레거시/디버그용으로 저장소에만 유지하며 기본 운영/배포에서는 사용하지 않습니다.
+### 8.2 기능 검증
 
-### 배포
-```bash
-uv run python logic-apps/deploy_workflow.py
-```
+- Crawl 단일 호출 성공
+- Preprocess 단일 호출 성공
+- Logic App 수동 1회 실행 성공
+- 실패 액션 0건
 
----
+### 8.3 데이터 검증
 
-## Phase 3: 데이터 크롤링 Function
+- raw 경로에 크롤링 산출물 생성
+- processed 경로에 정규화 산출물 생성
+- AI Search 인덱스 문서 카운트 증가
 
-### 크롤링 Function
-- **URI**: `func-crawl-ragi` (Azure Function App)
-- **트리거**: HTTP POST (Logic App에서 호출)
-- **입력**:
-  ```json
-  {
-    "source": "all" | "prec" | "detc" | "expc" | "admrul",
-    "max_pages": 0,
-    "detail_workers": 5,
-    "triggered_by": "logic-app-crawl-preprocess"
-  }
-  ```
-- **저장 경로**: `raw-documents/{source}/{YYYY-MM-DD}/`
+## 9. 리스크 및 대응
 
-### 파일 구조
-```
-logic-apps/crawl-function/
-├── function_app.py              # 크롤링 Function 메인 로직
-├── precedent_crawler.py         # 4개 소스별 크롤러 (병렬 처리)
-├── requirements.txt
-├── host.json
-└── local.settings.json.example
-```
+- 리스크: Function route 404 재발
+  - 대응: 함수 메타데이터/라우트/배포 아티팩트 즉시 점검, Remote Build 재배포
+- 리스크: Role assignment 충돌
+  - 대응: 기존 role assignment 정리 후 모듈 재배포
+- 리스크: 노트북과 실제 배포 상태 불일치
+  - 대응: 노트북에 리소스 조회 셀을 기본 포함하여 선검증
 
----
+## 10. 산출물 관리 원칙
 
-## Phase 4: 데이터 통합(Data Integration) Function
+- 문서, 다이어그램, 노트북은 동일한 서비스명/워크플로우명/엔드포인트를 사용한다.
+- 레거시 파일은 즉시 삭제하지 않고, 운영 경로에서 제외 여부를 명시한다.
+- 변경은 작은 단위로 검증 후 반영한다.
 
-> **중요**: 텍스트 분할(Split)은 여기서 하지 않음 → AI Search Skillset이 처리
+## 11. 최종 완료 정의 (Definition of Done)
 
-### 데이터 통합 Function
-- **URI**: `func-preprocess-ragi` (Azure Function App)
-- **트리거**: HTTP POST (Logic App에서 호출, 4개 소스 병렬)
-- **입력**:
-  ```json
-  {
-    "source": "prec" | "detc" | "expc" | "admrul",
-    "crawl_date": "2026-04-19",
-    "triggered_by": "logic-app-crawl-preprocess"
-  }
-  ```
-- **처리 단계**:
-  1. `raw-documents/{source}/{crawl_date}/` JSON 파일 읽기
-  2. 소스별 필드 정규화 (필드명 통일, 날짜 포맷, null 처리)
-  3. AI Search Indexer가 읽을 수 있는 형태로 변환
-  4. `processed-documents/{source}/{crawl_date}/{file_id}.json` 저장
+아래를 모두 충족하면 본 계획 완료로 판단한다.
 
-> **Split/Embedding은 AI Search가 담당**: Indexer가 processed-documents를 읽어 Text Split Skill → Embedding Skill 순서로 처리
-
-### 파일 구조
-```
-logic-apps/preprocess-function/
-├── function_app.py              # 데이터 통합 Function 메인 로직
-├── requirements.txt
-├── host.json
-└── local.settings.json.example
-
-src/preprocessing/
-├── __init__.py
-├── doc_intelligence.py          # Document Intelligence 처리 (멀티모달)
-└── embedding.py                 # (참조용) Embedding 설정
-```
-
----
-
-## Phase 5: Logic Apps 오케스트레이션 워크플로우
-
-> **Stage 1 전체를 담당** — 크롤링 + 데이터 통합만. Split/Embedding/Ingest는 AI Search Stage 2.
-
-### 워크플로우: crawl-preprocess-workflow
-- **트리거**: Recurrence (매일 06:00 KST)
-- **Step 1**: 모든 소스 병렬 크롤링 (Crawl Function)
-- **Step 2**: 4개 소스 병렬 데이터 통합 (Data Integration Function)
-- **Step 3**: 최종 결과 로깅 + 에러 알림
-
-### 워크플로우 단계
-```
-[Daily Schedule: 06:00 KST]
-    │
-    ▼
-┌──────────────────────────────────────────┐
-│ Step 1: CRAWLING (All Sources)           │
-│ HTTP POST: /api/crawl                    │
-│ body: { "source": "all" }                │
-│ → raw-documents/{source}/{date}/         │
-└──────────────────────────────────────────┘
-    │
-    ├─ SUCCESS? ──────────────────────┐
-    │                                 │
-    │              ┌──────────────────▼──────────────────────┐
-    │              │ Step 2: DATA INTEGRATION (Parallel)     │
-    │              │ ├─ POST /api/preprocess (prec)          │
-    │              │ ├─ POST /api/preprocess (detc)          │
-    │              │ ├─ POST /api/preprocess (expc)          │
-    │              │ └─ POST /api/preprocess (admrul)        │
-    │              │ → processed-documents/{source}/{date}/  │
-    │              └──────────────────┬──────────────────────┘
-    │                                 │
-    │              ┌──────────────────▼──────────┐
-    │              │ Step 3: Log Results         │
-    │              └─────────────────────────────┘
-    │
-    └─ FAILURE? ──────────────────┐
-                                  │
-                         ┌────────▼────────────┐
-                         │ Send Alert Email    │
-                         │ (SendGrid)          │
-                         └─────────────────────┘
-
-※ Split + Embedding + Ingest는 AI Search Indexer가 별도 스케줄로 처리
-```
-
-### 파일 구조
-```
-logic-apps/
-├── crawl-preprocess-workflow/
-│   └── workflow.json            # 새로운 통합 워크플로우 ⭐
-├── crawl-workflow/
-│   └── workflow.json            # 기존 크롤링 워크플로우 (유지)
-├── rag-indexing-workflow/
-│   └── workflow.json            # 기존 인덱싱 워크플로우
-├── connections.json             # 서비스 연결 설정
-├── host.json                    # Logic Apps 호스트 설정
-└── deploy_workflow.py           # 워크플로우 배포 스크립트 (수정됨)
-```
-
----
-
-## Phase 6: AI Search 인덱싱 (Stage 2)
-
-> **Stage 2 전체를 AI Search가 담당**: Indexer가 Blob에서 읽어 Skillset(Split+Embedding) 실행 후 Index에 저장
-
-### 총 6개 인덱스
-
-#### 법령 텍스트 인덱스 (4개) — processed-documents/ 소스
-| 인덱스명 | 소스 | 설명 |
-|---------|------|------|
-| `prec-court-index` | prec | 판례 (대법원, 각급 법원) |
-| `const-court-index` | detc | 헌재 결정례 |
-| `legis-interp-index` | expc | 법제처 해석례 |
-| `admin-appeal-index` | admrul | 행정심판 재결례 |
-
-**Skillset (법령 텍스트 공통)**:
-```
-processed-documents/{source}/{date}/*.json
-    │
-    ▼ [Native] Text Split Skill
-    │  (maximumPageLength: 2000, pageOverlapLength: 200)
-    ▼ [Native] AzureOpenAIEmbeddingSkill
-    │  (text-embedding-3-large, 3072차원)
-    ▼ AI Search Index (vector + semantic hybrid)
-```
-
-#### 멀티모달 인덱스 (2개) — PDF 수동 업로드 소스
-| 인덱스명 | Skillset 구성 | 설명 |
-|---------|-------------|------|
-| `{source}-multimodal-native-index` | Native only | Text Split + Embedding (비교 기준) |
-| `{source}-multimodal-custom-index` | Custom + Native | DI Layout → Custom Verbalize → Split + Embedding |
-
-**Native-only Skillset**:
-```
-raw/pdf/{source}/*.pdf
-    │
-    ▼ [Native] DocumentIntelligenceLayoutSkill → Markdown
-    ▼ [Native] Text Split Skill (markdown mode)
-    ▼ [Native] AzureOpenAIEmbeddingSkill
-    ▼ {source}-multimodal-native-index
-```
-
-**Custom + Native Skillset**:
-```
-raw/pdf/{source}/*.pdf
-    │
-    ▼ [Native] DocumentIntelligenceLayoutSkill → Markdown
-    ▼ [Custom WebApi] Verbalize Skill (GPT-5.4 이미지/도표 설명 생성)
-    ▼ [Native] Text Split Skill (markdown mode)
-    ▼ [Native] AzureOpenAIEmbeddingSkill
-    ▼ {source}-multimodal-custom-index
-```
-
-### 인덱싱 설정 스크립트
-```bash
-# 법령 텍스트 4개 인덱스 (prec/detc/expc/admrul)
-uv run python scripts/setup_ai_search_pipeline.py --run
-
-# 멀티모달 2개 인덱스 (native / custom+native 비교)
-uv run python scripts/setup_ai_search_multimodal_pipeline.py --source {source} --run-indexer
-```
-
-### 파일 구조
-```
-scripts/
-├── setup_ai_search_pipeline.py             # 법령 텍스트 4개 인덱스 설정
-├── setup_ai_search_multimodal_pipeline.py  # 멀티모달 2개 인덱스 설정
-└── prepare_multimodal_raw_dataset.py       # PDF 업로드 전 데이터 준비
-
-src/search/
-├── __init__.py
-├── index_manager.py         # 인덱스/스킬셋/인덱서 생성 관리
-└── legal_indexes.py         # 법령 텍스트 인덱스 스키마 정의
-```
-
----
-
-## Phase 7: Step-by-Step 노트북
-
-### 공통 준비
-| 순서 | 파일명 | 내용 |
-|------|--------|------|
-| 1 | `01-infra-deployment.ipynb` | Bicep 배포 + Function App 배포 + Shared PL 승인 + Logic Apps 배포 + AI Search 설정 |
-
-### 시나리오 A: 법령 문서 인덱싱
-| 순서 | 파일명 | 내용 |
-|------|--------|------|
-| 2 | `02-data-crawling.ipynb` | Logic App 크롤-통합 트리거 + 인덱서 모니터링 + Blob 결과 검증 |
-| 3 | `03-indexing.ipynb` | 인덱싱 샘플 실행 및 필요 시 전체 인덱스 삭제 + 인덱서 실행 |
-| 4 | `04-search-and-query.ipynb` | AI Search 하이브리드 검색 + GPT-5.4 RAG 질의응답 |
-| 5 | `05-multi-index-search.ipynb` | 멀티 인덱스 통합 검색 및 Cross-Index RAG |
-
-### 시나리오 B: 멀티모달 PDF/PPTX 인덱싱
-| 순서 | 파일명 | 내용 |
-|------|--------|------|
-| 6 | `06-multimodal-search.ipynb` | PDF Blob 업로드 → Native vs Custom+Native Skillset 비교 → 멀티모달 검색 데모 |
-
----
-
-## 실행 순서 요약
-
-```
-Step 1: 환경 설정
-  ├─ uv venv 생성, 패키지 설치
-  ├─ .env 설정 (Azure 구독, 리소스 이름 등)
-  └─ Bicep CLI, Azure Functions Core Tools 설치
-
-Step 2: 인프라 배포 (Phase 1)
-  ├─ Resource Group 생성
-  ├─ Storage, AI Services, AI Search, DI 등 배포
-  └─ Private Network 구성 (VNet, PE, Private DNS Zone)
-
-Step 3: Function App 배포 (Phase 3, 4)
-  ├─ Crawl Function 코드 배포 (logic-apps/crawl-function/)
-  ├─ Data Integration Function 코드 배포 (logic-apps/preprocess-function/)
-  └─ VNet Integration 확인
-
-Step 4: Logic App 워크플로우 배포 (Phase 5)
-  ├─ crawl-preprocess-workflow 배포
-  ├─ crawl-workflow 배포
-  ├─ 연결 설정 (Storage, HTTP)
-  └─ 트리거 활성화 (매일 06:00 KST)
-
-Step 5: Stage 1 실행 — 크롤링 + 데이터 통합
-  ├─ Logic App 수동 실행 (초기 Full Build)
-  ├─ raw-documents/ 확인 (크롤링 결과)
-  ├─ processed-documents/ 확인 (데이터 통합 결과)
-  └─ 실패 로그 분석
-
-Step 6: Stage 2 설정 — AI Search 인덱싱 (Phase 6)
-  ├─ [법령 4개] setup_ai_search_pipeline.py 실행
-  │   Index + Skillset(Text Split + Embedding) + DataSource + Indexer 생성
-  ├─ [멀티모달 2개] PDF를 Blob에 수동 업로드
-  │   setup_ai_search_multimodal_pipeline.py 실행
-  │   (native-only 인덱스 + custom+native 인덱스 비교)
-  └─ 초기 인덱서 Full Build 실행 (--run)
-
-Step 7: 검색 테스트 (Phase 7)
-  ├─ Vector Search 테스트
-  ├─ Hybrid Search 테스트
-  └─ RAG 쿼리 테스트
-
-Step 8: 자동화 스케줄 활성화
-  ├─ Logic App 스케줄 확인
-  └─ 모니터링 설정 (실패 알림)
-```
-
----
-
-## 배포 의존성
-
-```
-┌─────────────────┐
-│ Bicep (Phase 1) │ ← 먼저 실행
-└────────┬────────┘
-         │
-         ▼
-┌──────────────────────────┐
-│ Crawl Function           │ ← Phase 3 배포
-│ Data Integration Function│   (Phase 4)
-└────────┬─────────────────┘
-         │
-         ▼
-┌──────────────────────┐
-│ Logic App Workflows  │ ← Phase 5 배포
-│ (Connections 포함)   │
-└────────┬─────────────┘
-         │
-         ▼
-┌──────────────────────┐
-│ AI Search Indexers   │ ← Phase 6 배포
-└──────────────────────┘
-```
-
----
-
-## 초기 빌드 vs 증분 업데이트
-
-### 초기 빌드 (첫 실행)
-```
-[Stage 1 - Logic Apps]
-Logic App 수동 실행 → 크롤링 (1-2시간) → 데이터 통합 (30분)
-→ processed-documents/ 생성 완료
-
-[Stage 2 - AI Search]
-setup_ai_search_pipeline.py --run → Indexer Full Build (20분)
-  └─ Skillset: Text Split → Embedding → Index 저장
-```
-
-### 증분 업데이트 (일별 자동)
-```
-[Stage 1 - Logic Apps, 매일 06:00 KST]
-Logic App 스케줄 실행 → 크롤링 (10-30분) → 데이터 통합 (5분)
-→ processed-documents/{오늘날짜}/ 추가
-
-[Stage 2 - AI Search, 별도 스케줄]
-Indexer 증분 실행 → lastModified 기준 신규 파일만 처리
-  └─ Skillset: Text Split → Embedding → Index 추가
-```
-
-### 구현 방식
-- `raw-documents/`: 날짜별 폴더 (2026-04-19/, 2026-04-20/) — 크롤링 원본
-- `processed-documents/`: 날짜별 폴더 (동일) — AI Search Indexer 입력
-- **Stage 1 증분**: Logic App이 매일 신규 날짜 폴더에만 쓰기
-- **Stage 2 증분**: AI Search Indexer `metadata_storage_last_modified` High Water Mark
-
----
-
-## 기술 스택
-
-| 구성 요소 | 기술 |
-|-----------|------|
-| 패키지 관리 | uv |
-| 크롤링 (시나리오 A) | requests, BeautifulSoup4 |
-| 스토리지 | Azure Blob Storage |
-| 문서 분석 (시나리오 B) | Azure Document Intelligence (Layout/Markdown) |
-| 임베딩 | Azure OpenAI (text-embedding-3-large) |
-| 검색 | Azure AI Search (Vector + Hybrid + Semantic) |
-| 온케스트레이션 (시나리오 A) | Azure Logic Apps (Standard) |
-| 이미지 Verbalization (시나리오 B) | Azure OpenAI GPT-5.4 Vision |
-| 인프라 | Azure Bicep |
-| 리전 | Sweden Central |
+1. Stage 1: Logic App 기준 crawl + preprocess 연계 성공
+2. Stage 2: 대상 인덱스 생성 및 데이터 적재 확인
+3. 우선 범위 노트북(01~04) 정리 완료 및 실행 검증 통과
+4. 문서/다이어그램/코드 기준 정보 일치

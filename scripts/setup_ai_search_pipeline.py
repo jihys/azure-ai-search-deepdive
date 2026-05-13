@@ -530,6 +530,18 @@ def main() -> None:
 
         create_index(cfg)
         create_skillset(cfg)
+
+        # Indexer reset 먼저 (change tracking state가 있으면 datasource 삭제 불가)
+        indexer_name = cfg["indexer_name"]
+        reset_url = f"{SEARCH_ENDPOINT}/indexers/{indexer_name}/reset?api-version={API_VERSION}"
+        reset_resp = requests.post(reset_url, headers=_headers(), json={}, timeout=120)
+        if reset_resp.status_code == 204:
+            print(f"  - Indexer '{indexer_name}' reset 완료")
+        elif reset_resp.status_code == 404:
+            pass  # indexer가 없으면 skip
+        else:
+            print(f"  - Indexer reset skip: {reset_resp.status_code}")
+
         create_datasource(cfg)
         create_indexer(cfg, schedule=args.schedule, start_time=args.start_time)
 
