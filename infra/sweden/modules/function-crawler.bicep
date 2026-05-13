@@ -137,5 +137,6 @@ output funcAppName string = funcApp.name
 output funcAppHostname string = funcApp.properties.defaultHostName
 output funcAppId string = funcApp.id
 output funcAppPrincipalId string = funcApp.identity.principalId
+output hostingPlanId string = funcPlan.id
 // Logic Apps가 호출할 HTTP 트리거 URL (인증: anonymous)
 output crawlTriggerUrl string = 'https://${funcApp.properties.defaultHostName}/api/crawl'

@@ -168,7 +168,27 @@ module functionCrawler 'modules/function-crawler.bicep' = {
 }
 
 // ============================================
-// Logic App (Consumption) - 크롤 스케줄러
+// Azure Function App (Preprocess) - 동일 EP1 플랜 공유
+// crawl 후 raw JSON → processed JSONL (Integration) 수행
+// ============================================
+module functionPreprocess 'modules/function-preprocess.bicep' = {
+  scope: rgKorea
+  name: 'function-preprocess-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    funcSubnetId: vnet.outputs.funcSubnetId
+    hostingPlanId: functionCrawler.outputs.hostingPlanId
+    storageAccountName: storage.outputs.storageAccountName
+    storageAccountId: storage.outputs.storageAccountId
+    rawContainerName: blobContainerName
+    processedContainerName: 'processed-documents'
+  }
+}
+
+// ============================================
+// Logic App (Consumption) - 크롤 + 전처리 통합 스케줄러
+//   Daily 21:00 UTC: crawl → 4-source parallel preprocess (JSON→JSONL)
 // ============================================
 module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
   scope: rgKorea
@@ -177,6 +197,7 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
     location: location
     suffix: suffix
     crawlFunctionUrl: functionCrawler.outputs.crawlTriggerUrl
+    preprocessFunctionUrl: functionPreprocess.outputs.preprocessTriggerUrl
     crawlerLimit: crawlerLimit
   }
 }

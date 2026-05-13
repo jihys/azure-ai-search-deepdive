@@ -1,16 +1,14 @@
 // ============================================
-// Azure Function App (Crawler) - Elastic Premium EP1
-// Python 3.11 + VNet Integration (snet-func → Storage PE)
+// Azure Function App (Preprocess - JSON → JSONL Integration)
+// Elastic Premium EP1 (Linux Python 3.11) on shared plan
 //
 // 역할:
-//   Logic Apps 스케줄 트리거 → HTTP 수신
-//   → law.go.kr 크롤링 (공개 인터넷 아웃바운드)
-//   → Blob Storage 업로드 (VNet → PE 아웃바운드)
+//   Logic Apps `crawl-preprocess-workflow` 가 crawl 후 호출
+//   → raw-documents/{source}/{date}/*.json
+//   → date 필드 정규화 + 80 MiB JSONL 파트로 묶기
+//   → processed-documents/{source}/{date}/docs-part-NNN.jsonl
 //
-// EP1 사용 이유:
-//   Consumption Plan은 VNet integration 미지원 →
-//   Private Storage PE에 아웃바운드 접근 불가.
-//   EP1은 VNet integration 지원 (아웃바운드만)
+// Storage 접근: Managed Identity (VNet Integration → Storage PE)
 // ============================================
 
 @description('배포 리전')
@@ -19,45 +17,30 @@ param location string
 @description('리소스 이름 접미사')
 param suffix string
 
-@description('Function App VNet integration 서브넷 ID (snet-func)')
-param funcSubnetId string
+@description('Function App VNet integration 서브넷 ID (snet-func). 비워두면 VNet integration 미설정 (배포 후 az CLI로 추가)')
+param funcSubnetId string = ''
 
-@description('Storage Account 이름 (크롤러가 업로드할 대상)')
+@description('공유 Elastic Premium 플랜 ID (function-crawler.bicep 의 asp-crawl 플랜)')
+param hostingPlanId string
+
+@description('Storage Account 이름')
 param storageAccountName string
 
 @description('Storage Account ID (RBAC용)')
 param storageAccountId string
 
-@description('Blob 컨테이너 이름')
-param blobContainerName string = 'raw-documents'
+@description('Raw JSON 컨테이너 이름')
+param rawContainerName string = 'raw-documents'
 
-@description('크롤러가 수집할 법령 건수')
-param crawlerLimit int = 10
+@description('Processed JSONL 컨테이너 이름')
+param processedContainerName string = 'processed-documents'
 
-var planName = 'asp-crawl-ragi-${take(suffix, 8)}'
-var funcAppName = 'func-crawl-ragi-${take(suffix, 8)}'
+var funcAppName = 'func-preprocess-ragi-${take(suffix, 8)}'
 
 // ── RBAC Role IDs ──
 var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 var storageQueueDataContributorRoleId = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 var storageTableDataContributorRoleId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
-
-// ── Elastic Premium Plan (Linux, EP1) ──
-// EP1: 1 vCore, 3.5GB RAM, VNet integration 지원
-resource funcPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: planName
-  location: location
-  sku: {
-    name: 'EP1'
-    tier: 'ElasticPremium'
-  }
-  kind: 'elastic'
-  properties: {
-    reserved: true   // Linux 필수
-    maximumElasticWorkerCount: 5
-  }
-  tags: { project: 'rag-indexing-lab' }
-}
 
 // ── Function App (Python 3.11, Linux) ──
 resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
@@ -68,24 +51,22 @@ resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
     type: 'SystemAssigned'
   }
   properties: {
-    serverFarmId: funcPlan.id
+    serverFarmId: hostingPlanId
     httpsOnly: true
-    // VNet integration: 아웃바운드 트래픽을 VNet으로 라우팅
-    // → snet-func → VNet 라우팅 → snet-pep → Storage PE
-    virtualNetworkSubnetId: funcSubnetId
+    virtualNetworkSubnetId: empty(funcSubnetId) ? null : funcSubnetId
     siteConfig: {
       linuxFxVersion: 'Python|3.11'
-      // MI 기반 Storage 연결 (연결 문자열 없이 MI로 접근)
       appSettings: [
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'python' }
-        // AzureWebJobsStorage: MI 기반 (SharedKey 없이)
+        // MI 기반 AzureWebJobsStorage
         { name: 'AzureWebJobsStorage__accountName', value: storageAccountName }
         { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
-        // 크롤러 설정
+        // Preprocess 설정
         { name: 'AZURE_STORAGE_ACCOUNT_NAME', value: storageAccountName }
-        { name: 'AZURE_BLOB_CONTAINER_NAME', value: blobContainerName }
-        { name: 'CRAWLER_LIMIT', value: string(crawlerLimit) }
+        { name: 'AZURE_BLOB_CONTAINER_RAW', value: rawContainerName }
+        { name: 'AZURE_BLOB_CONTAINER_PROCESSED', value: processedContainerName }
+        { name: 'PREPROCESS_WORKERS', value: '16' }
       ]
       cors: {
         allowedOrigins: ['https://portal.azure.com']
@@ -97,7 +78,6 @@ resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
 }
 
 // ── RBAC: Function App MI → Storage Blob Data Contributor ──
-// 크롤러가 Blob에 파일을 쓰기 위한 권한
 resource blobContribRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storageAccountId, funcApp.id, storageBlobDataContributorRoleId)
   scope: resourceGroup()
@@ -108,8 +88,7 @@ resource blobContribRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
-// ── RBAC: Function App MI → Storage Queue Data Contributor ──
-// Functions 런타임 큐 접근용
+// ── RBAC: Function App MI → Storage Queue Data Contributor (runtime) ──
 resource queueContribRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storageAccountId, funcApp.id, storageQueueDataContributorRoleId)
   scope: resourceGroup()
@@ -120,8 +99,7 @@ resource queueContribRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
-// ── RBAC: Function App MI → Storage Table Data Contributor ──
-// Functions 런타임 테이블 접근용
+// ── RBAC: Function App MI → Storage Table Data Contributor (runtime) ──
 resource tableContribRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storageAccountId, funcApp.id, storageTableDataContributorRoleId)
   scope: resourceGroup()
@@ -137,6 +115,4 @@ output funcAppName string = funcApp.name
 output funcAppHostname string = funcApp.properties.defaultHostName
 output funcAppId string = funcApp.id
 output funcAppPrincipalId string = funcApp.identity.principalId
-output hostingPlanId string = funcPlan.id
-// Logic Apps가 호출할 HTTP 트리거 URL (인증: anonymous)
-output crawlTriggerUrl string = 'https://${funcApp.properties.defaultHostName}/api/crawl'
+output preprocessTriggerUrl string = 'https://${funcApp.properties.defaultHostName}/api/preprocess'

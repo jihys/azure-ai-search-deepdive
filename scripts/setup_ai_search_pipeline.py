@@ -8,15 +8,16 @@ AI Search 법률 데이터 인덱싱 파이프라인 설정 스크립트
   4. admin-appeal-index    — 행정심판 재결례
 
 파이프라인 흐름:
-  Blob Storage (raw-documents/{source}/)
-    → JSON 파싱 (parsingMode: json)
+  Blob Storage (processed-documents/{source}/) — JSONL bundles
+    → JSON Lines 파싱 (parsingMode: jsonLines)
     → 필드 매핑 (크롤러 한국어 키 → 인덱스 영문 필드)
     → Azure OpenAI Embedding Skill (요지 텍스트 벡터 생성)
     → AI Search Index (저장)
 
+  ※ Preprocess 파이프라인(`scripts/preprocess_integration.py` or Logic App)·
+      raw-documents/{source}/{date}/*.json → processed-documents/{source}/{date}/docs-part-NNN.jsonl
   ※ 각 소스별 별도 Datasource(prefix 필터) + Indexer + Skillset + Index
   ※ HighWaterMark 변경 감지 → 신규/변경 데이터만 처리
-  ※ 크롤러 JSON이 이미 summary 영역만 추출하므로 SplitSkill 불필요
 
 실행 방법:
   VNet 내부 머신 또는 VPN 접속 후 실행 (AI Search가 Private Endpoint 전용)
@@ -53,7 +54,7 @@ API_VERSION = "2024-11-01-preview"
 SEARCH_ENDPOINT = os.environ.get("AZURE_SEARCH_ENDPOINT") or os.environ.get("AZURE_SEARCH_SERVICE_ENDPOINT", "")
 SEARCH_ADMIN_KEY = os.environ.get("AZURE_SEARCH_ADMIN_KEY", "")
 STORAGE_RESOURCE_ID = os.environ.get("AZURE_STORAGE_RESOURCE_ID", "")
-STORAGE_CONTAINER = os.environ.get("BLOB_CONTAINER_NAME", "raw-documents")
+STORAGE_CONTAINER = os.environ.get("BLOB_CONTAINER_NAME", "processed-documents")
 OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
 EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-large")
 
@@ -426,12 +427,12 @@ def create_indexer(cfg: dict, schedule: str, start_time: str) -> None:
         "skillsetName": cfg["skillset_name"],
         "targetIndexName": cfg["index_name"],
         "parameters": {
-            "batchSize": 10,
-            "maxFailedItems": 20,
-            "maxFailedItemsPerBatch": 10,
+            "batchSize": 50,
+            "maxFailedItems": 500,
+            "maxFailedItemsPerBatch": 100,
             "configuration": {
                 "dataToExtract": "contentAndMetadata",
-                "parsingMode": "json",
+                "parsingMode": "jsonLines",
             },
         },
         "fieldMappings": cfg["field_mappings"],

@@ -153,8 +153,28 @@ module functionCrawler 'modules/function-crawler.bicep' = {
 }
 
 // ============================================
-// Logic App (Consumption) - 크롤 스케줄러
-// 매일 21:00 UTC (= 06:00 KST) → Function 호출
+// Azure Function App (Preprocess) - 동일 EP1 플랜 공유
+// crawl 후 raw JSON → processed JSONL (Integration) 수행
+// ============================================
+module functionPreprocess 'modules/function-preprocess.bicep' = {
+  scope: rg
+  name: 'function-preprocess-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    funcSubnetId: vnet.outputs.funcSubnetId
+    hostingPlanId: functionCrawler.outputs.hostingPlanId
+    storageAccountName: storage.outputs.storageAccountName
+    storageAccountId: storage.outputs.storageAccountId
+    rawContainerName: blobContainerName
+    processedContainerName: 'processed-documents'
+  }
+}
+
+// ============================================
+// Logic App (Consumption) - 크롤 + 전처리 통합 스케줄러
+// 매일 21:00 UTC (= 06:00 KST)
+//   Call_Crawl_Function → Parallel preprocess (prec/detc/expc/admrul)
 // ============================================
 module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
   scope: rg
@@ -163,6 +183,7 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
     location: location
     suffix: suffix
     crawlFunctionUrl: functionCrawler.outputs.crawlTriggerUrl
+    preprocessFunctionUrl: functionPreprocess.outputs.preprocessTriggerUrl
     crawlerLimit: crawlerLimit
   }
 }
@@ -248,7 +269,9 @@ output aiSearchName string = aiSearch.outputs.searchServiceName
 output docIntelligenceEndpoint string = docIntelligence.outputs.endpoint
 output aiSearchPrincipalId string = aiSearch.outputs.searchServicePrincipalId
 output crawlFunctionUrl string = functionCrawler.outputs.crawlTriggerUrl
+output preprocessFunctionUrl string = functionPreprocess.outputs.preprocessTriggerUrl
 output crawlFunctionName string = functionCrawler.outputs.funcAppName
+output preprocessFunctionName string = functionPreprocess.outputs.funcAppName
 output crawlLogicAppName string = logicAppCrawl.outputs.crawlWorkflowName
 output jumpvmName string = jumpvm.outputs.vmName
 output jumpvmPublicIp string = jumpvm.outputs.publicIpAddress
