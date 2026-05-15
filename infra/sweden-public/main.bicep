@@ -1,15 +1,16 @@
 // ============================================
-// Azure RAG Indexing Lab - Main Bicep Template
+// Azure RAG Indexing Lab - Main Bicep Template (PUBLIC variant)
 // Region: Sweden Central (swedencentral)
-// Network: Full Private (VNet + Private Endpoints)
-// Pipeline: AI Search Native Indexer + Skillset
-//           (Logic Apps 대신 AI Search Skills 사용)
+// Network: All resources publicly reachable (workshop / lab)
+//          - No Private Endpoints
+//          - No JumpVM
+//          - VNet kept only for Function App egress (FC1/EP1)
 // ============================================
 
 targetScope = 'subscription'
 
 @description('리소스 그룹 이름')
-param resourceGroupName string = 'rg-rag-indexing-lab-swc'
+param resourceGroupName string = 'rg-rag-indexing-lab-swc-pub'
 
 @description('배포 리전 - Sweden Central (Document Intelligence 지원)')
 param location string = 'swedencentral'
@@ -39,16 +40,6 @@ param blobContainerName string = 'raw-documents'
 @description('크롤러가 수집할 법령 건수')
 param crawlerLimit int = 10
 
-@description('JumpVM 관리자 계정명')
-param jumpvmAdminUsername string = 'azureadmin'
-
-@description('JumpVM 관리자 비밀번호')
-@secure()
-param jumpvmAdminPassword string
-
-@description('JumpVM Entra ID 로그인을 허용할 사용자 Object ID 목록')
-param jumpvmEntraUserObjectIds array = []
-
 // ============================================
 // Resource Group
 // ============================================
@@ -59,6 +50,7 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
     project: 'rag-indexing-lab'
     environment: 'lab'
     region: 'swedencentral'
+    networking: 'public'
   }
 }
 
@@ -84,7 +76,7 @@ module storage 'modules/storage.bicep' = {
     location: location
     suffix: suffix
     containerName: blobContainerName
-    userObjectIds: jumpvmEntraUserObjectIds
+    userObjectIds: []
   }
 }
 
@@ -263,48 +255,9 @@ module foundryHub 'modules/foundry-hub.bicep' = {
 }
 
 // ============================================
-// Private Endpoints (인바운드 - VNet 내부 접근)
+// (PUBLIC variant) No Private Endpoints / No JumpVM
+// All services are reachable directly via their public endpoints.
 // ============================================
-module privateEndpoints 'modules/private-endpoints.bicep' = {
-  scope: rg
-  name: 'private-endpoints-deployment'
-  params: {
-    location: location
-    suffix: suffix
-    pepSubnetId: vnet.outputs.pepSubnetId
-    storageAccountId: storage.outputs.storageAccountId
-    searchServiceId: aiSearch.outputs.searchServiceId
-    aiServicesId: openai.outputs.accountId
-    docIntelligenceId: docIntelligence.outputs.docIntelligenceId
-    hubId: foundryHub.outputs.hubId
-    keyVaultId: foundryHub.outputs.keyVaultId
-    blobDnsZoneId: vnet.outputs.blobDnsZoneId
-    searchDnsZoneId: vnet.outputs.searchDnsZoneId
-    cogServicesDnsZoneId: vnet.outputs.cogServicesDnsZoneId
-    openaiDnsZoneId: vnet.outputs.openaiDnsZoneId
-    azuremlDnsZoneId: vnet.outputs.azuremlDnsZoneId
-    notebooksDnsZoneId: vnet.outputs.notebooksDnsZoneId
-    vaultDnsZoneId: vnet.outputs.vaultDnsZoneId
-    servicesAiDnsZoneId: vnet.outputs.servicesAiDnsZoneId
-  }
-}
-
-// ============================================
-// JumpVM - AI Search / Private Endpoint 접근용 관리 VM
-// publicNetworkAccess=Disabled 서비스에 VNet 내부에서만 접근
-// snet-jump (10.0.0.0/24) → snet-pep → Private Endpoint → Service
-// ============================================
-module jumpvm 'modules/jumpvm.bicep' = {
-  scope: rg
-  name: 'jumpvm-deployment'
-  params: {
-    location: location
-    jumpSubnetId: vnet.outputs.jumpSubnetId
-    adminUsername: jumpvmAdminUsername
-    adminPassword: jumpvmAdminPassword
-    entraUserObjectIds: jumpvmEntraUserObjectIds
-  }
-}
 
 // ============================================
 // Outputs
@@ -328,8 +281,6 @@ output preprocessFunctionName string = functionPreprocess.outputs.funcAppName
 output skillsFunctionName string = functionSkills.outputs.funcAppName
 output skillsFunctionUrl string = functionSkills.outputs.skillsFunctionUrl
 output crawlLogicAppName string = logicAppCrawl.outputs.crawlWorkflowName
-output jumpvmName string = jumpvm.outputs.vmName
-output jumpvmPublicIp string = jumpvm.outputs.publicIpAddress
 output foundryHubName string = foundryHub.outputs.hubName
 output foundryProjectName string = foundryHub.outputs.projectName
 output foundryKeyVaultName string = foundryHub.outputs.keyVaultName

@@ -217,6 +217,28 @@ module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' =
 }
 
 // ============================================
+// Azure Function App (Skills) - 동일 EP1 플랜 공유
+// AI Search 멀티모달 skillset 의 Custom WebApi Skills 호스트
+// (markdown_split / pptx_page_split / verbalize)
+// ============================================
+module functionSkills 'modules/function-skills.bicep' = {
+  scope: rgKorea
+  name: 'function-skills-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    funcSubnetId: vnet.outputs.funcSubnetId
+    hostingPlanId: functionCrawler.outputs.hostingPlanId
+    storageAccountName: storage.outputs.storageAccountName
+    storageAccountId: storage.outputs.storageAccountId
+    aiServicesAccountId: openai.outputs.accountId
+    openaiEndpoint: openai.outputs.endpoint
+    gpt54Deployment: gptDeploymentName
+    docIntelligenceEndpoint: docIntelligence.outputs.endpoint
+  }
+}
+
+// ============================================
 // Logic App (Consumption) - 크롤 + 전처리 통합 스케줄러
 //   Daily 21:00 UTC: crawl → 4-source parallel preprocess (JSON→JSONL)
 // ============================================
@@ -313,6 +335,8 @@ output docIntelligenceEndpoint string = docIntelligence.outputs.endpoint
 output aiSearchPrincipalId string = aiSearch.outputs.searchServicePrincipalId
 output crawlFunctionUrl string = functionCrawler.outputs.crawlTriggerUrl
 output crawlFunctionName string = functionCrawler.outputs.funcAppName
+output skillsFunctionName string = functionSkills.outputs.funcAppName
+output skillsFunctionUrl string = functionSkills.outputs.skillsFunctionUrl
 output crawlLogicAppName string = logicAppCrawl.outputs.crawlWorkflowName
 output jumpvmName string = jumpvm.outputs.vmName
 output jumpvmPublicIp string = jumpvm.outputs.publicIpAddress
