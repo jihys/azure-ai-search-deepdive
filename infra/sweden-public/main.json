@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "11900606475780864616"
+      "templateHash": "17579407077928805587"
     }
   },
   "parameters": {
@@ -82,6 +82,13 @@
       "metadata": {
         "description": "크롤러가 수집할 법령 건수"
       }
+    },
+    "userObjectIds": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "데이터 평면(Storage/AI Search/AI Services/Doc Intelligence) RBAC를 부여할 Entra ID 사용자 Object ID 배열 — 본인 노트북에서 핸즈온 시 본인 Object ID 입력"
+      }
     }
   },
   "resources": [
@@ -122,7 +129,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "12049763222891996442"
+              "templateHash": "12016044379626401833"
             }
           },
           "parameters": {
@@ -230,206 +237,6 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
               ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.blob.core.windows.net",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.blob.core.windows.net', format('link-blob-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.blob.core.windows.net')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.search.windows.net",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.search.windows.net', format('link-search-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.search.windows.net')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.cognitiveservices.azure.com",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.cognitiveservices.azure.com', format('link-cog-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.openai.azure.com",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.openai.azure.com', format('link-openai-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.api.azureml.ms",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.api.azureml.ms', format('link-azureml-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.api.azureml.ms')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.notebooks.azure.net",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.notebooks.azure.net', format('link-notebooks-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.notebooks.azure.net')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.vaultcore.azure.net",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.vaultcore.azure.net', format('link-vault-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones",
-              "apiVersion": "2020-06-01",
-              "name": "privatelink.services.ai.azure.com",
-              "location": "global",
-              "tags": {
-                "project": "rag-indexing-lab"
-              }
-            },
-            {
-              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
-              "apiVersion": "2020-06-01",
-              "name": "[format('{0}/{1}', 'privatelink.services.ai.azure.com', format('link-services-ai-{0}', take(parameters('suffix'), 8)))]",
-              "location": "global",
-              "properties": {
-                "virtualNetwork": {
-                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-                },
-                "registrationEnabled": false
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
             }
           ],
           "outputs": {
@@ -456,38 +263,6 @@
             "jumpSubnetId": {
               "type": "string",
               "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('jumpSubnetName'))]"
-            },
-            "blobDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.blob.core.windows.net')]"
-            },
-            "searchDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.search.windows.net')]"
-            },
-            "cogServicesDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')]"
-            },
-            "openaiDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')]"
-            },
-            "azuremlDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.api.azureml.ms')]"
-            },
-            "notebooksDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.notebooks.azure.net')]"
-            },
-            "vaultDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
-            },
-            "servicesAiDnsZoneId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')]"
             }
           }
         }
@@ -517,7 +292,7 @@
             "value": "[parameters('blobContainerName')]"
           },
           "userObjectIds": {
-            "value": []
+            "value": "[parameters('userObjectIds')]"
           }
         },
         "template": {
@@ -720,6 +495,9 @@
           },
           "gptModelVersion": {
             "value": "[parameters('gptModelVersion')]"
+          },
+          "userObjectIds": {
+            "value": "[parameters('userObjectIds')]"
           }
         },
         "template": {
@@ -729,7 +507,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "13574015058140612064"
+              "templateHash": "3709409222188853371"
             }
           },
           "parameters": {
@@ -778,10 +556,20 @@
               "metadata": {
                 "description": "Foundry Agent Service 프로젝트 이름 (Scenario E)"
               }
+            },
+            "userObjectIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "AI Services / OpenAI / Foundry Project 사용자 RBAC를 부여할 Entra ID 사용자 Object ID 배열"
+              }
             }
           },
           "variables": {
-            "accountName": "[format('ais-ragi-{0}', take(parameters('suffix'), 8))]"
+            "accountName": "[format('ais-ragi-{0}', take(parameters('suffix'), 8))]",
+            "cognitiveServicesOpenAIUserRoleId": "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd",
+            "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908",
+            "azureAIUserRoleId": "53ca6127-db72-4b80-b1b0-d745d6d5456d"
           },
           "resources": [
             {
@@ -863,6 +651,60 @@
               "dependsOn": [
                 "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
               ]
+            },
+            {
+              "copy": {
+                "name": "userOpenAIUser",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', variables('accountName')), parameters('userObjectIds')[copyIndex()], variables('cognitiveServicesOpenAIUserRoleId'))]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesOpenAIUserRoleId'))]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "userCogUser",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', variables('accountName')), parameters('userObjectIds')[copyIndex()], variables('cognitiveServicesUserRoleId'))]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesUserRoleId'))]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "userAIUser",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', variables('accountName')), parameters('userObjectIds')[copyIndex()], variables('azureAIUserRoleId'))]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('azureAIUserRoleId'))]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -917,6 +759,9 @@
           },
           "suffix": {
             "value": "[parameters('suffix')]"
+          },
+          "userObjectIds": {
+            "value": "[parameters('userObjectIds')]"
           }
         },
         "template": {
@@ -926,7 +771,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "16067296830006544393"
+              "templateHash": "15626755654224383762"
             }
           },
           "parameters": {
@@ -941,10 +786,18 @@
               "metadata": {
                 "description": "리소스 이름 접미사"
               }
+            },
+            "userObjectIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Document Intelligence 사용자 RBAC를 부여할 Entra ID 사용자 Object ID 배열"
+              }
             }
           },
           "variables": {
-            "docIntelName": "[format('di-ragi-{0}', take(parameters('suffix'), 8))]"
+            "docIntelName": "[format('di-ragi-{0}', take(parameters('suffix'), 8))]",
+            "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908"
           },
           "resources": [
             {
@@ -966,6 +819,24 @@
               "tags": {
                 "project": "rag-indexing-lab"
               }
+            },
+            {
+              "copy": {
+                "name": "userCogUser",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', variables('docIntelName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', variables('docIntelName')), parameters('userObjectIds')[copyIndex()], variables('cognitiveServicesUserRoleId'))]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesUserRoleId'))]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('docIntelName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -1013,6 +884,9 @@
           },
           "aiServicesId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.accountId.value]"
+          },
+          "userObjectIds": {
+            "value": "[parameters('userObjectIds')]"
           }
         },
         "template": {
@@ -1022,7 +896,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "4905653798331322760"
+              "templateHash": "6613106369480492612"
             }
           },
           "parameters": {
@@ -1061,13 +935,22 @@
               "metadata": {
                 "description": "AI Services 리소스 ID (RBAC용)"
               }
+            },
+            "userObjectIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "AI Search 사용자 RBAC를 부여할 Entra ID 사용자 Object ID 배열"
+              }
             }
           },
           "variables": {
             "searchServiceName": "[format('search-ragi-{0}', take(parameters('suffix'), 8))]",
             "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe",
             "storageTableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3",
-            "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908"
+            "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908",
+            "searchServiceContributorRoleId": "7ca78c08-252a-4471-8644-bb5ff32d4ba0",
+            "searchIndexDataContributorRoleId": "8ebe5a00-799e-43f5-93ac-243d3dce84a7"
           },
           "resources": [
             {
@@ -1126,6 +1009,42 @@
                 "principalId": "[reference(resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), '2024-06-01-preview', 'full').identity.principalId]",
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesUserRoleId'))]",
                 "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Search/searchServices', variables('searchServiceName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "userSearchServiceContributor",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Search/searchServices', variables('searchServiceName'))]",
+              "name": "[guid(resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), parameters('userObjectIds')[copyIndex()], variables('searchServiceContributorRoleId'))]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('searchServiceContributorRoleId'))]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Search/searchServices', variables('searchServiceName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "userSearchIndexDataContributor",
+                "count": "[length(parameters('userObjectIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Search/searchServices', variables('searchServiceName'))]",
+              "name": "[guid(resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), parameters('userObjectIds')[copyIndex()], variables('searchIndexDataContributorRoleId'))]",
+              "properties": {
+                "principalId": "[parameters('userObjectIds')[copyIndex()]]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('searchIndexDataContributorRoleId'))]",
+                "principalType": "User"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Search/searchServices', variables('searchServiceName'))]"

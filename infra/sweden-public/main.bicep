@@ -40,6 +40,9 @@ param blobContainerName string = 'raw-documents'
 @description('크롤러가 수집할 법령 건수')
 param crawlerLimit int = 10
 
+@description('데이터 평면(Storage/AI Search/AI Services/Doc Intelligence) RBAC를 부여할 Entra ID 사용자 Object ID 배열 — 본인 노트북에서 핸즈온 시 본인 Object ID 입력')
+param userObjectIds array = []
+
 // ============================================
 // Resource Group
 // ============================================
@@ -76,7 +79,7 @@ module storage 'modules/storage.bicep' = {
     location: location
     suffix: suffix
     containerName: blobContainerName
-    userObjectIds: []
+    userObjectIds: userObjectIds
   }
 }
 
@@ -93,6 +96,7 @@ module openai 'modules/openai.bicep' = {
     gptDeploymentName: gptDeploymentName
     gptModelName: gptModelName
     gptModelVersion: gptModelVersion
+    userObjectIds: userObjectIds
   }
 }
 
@@ -105,6 +109,7 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
   params: {
     location: location
     suffix: suffix
+    userObjectIds: userObjectIds
   }
 }
 
@@ -122,6 +127,7 @@ module aiSearch 'modules/ai-search.bicep' = {
     sku: searchSku
     storageAccountId: storage.outputs.storageAccountId
     aiServicesId: openai.outputs.accountId
+    userObjectIds: userObjectIds
   }
 }
 

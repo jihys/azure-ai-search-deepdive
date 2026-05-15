@@ -20,6 +20,9 @@ param storageAccountId string
 @description('AI Services 리소스 ID (RBAC용)')
 param aiServicesId string
 
+@description('AI Search 사용자 RBAC를 부여할 Entra ID 사용자 Object ID 배열')
+param userObjectIds array = []
+
 var searchServiceName = 'search-ragi-${take(suffix, 8)}'
 
 resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' = {
@@ -87,3 +90,28 @@ output endpoint string = 'https://${searchService.name}.search.windows.net'
 output searchServiceName string = searchService.name
 output searchServiceId string = searchService.id
 output searchServicePrincipalId string = searchService.identity.principalId
+
+// ============================================
+// RBAC: 사용자 → AI Search (노트북/SDK에서 직접 접근)
+// ============================================
+var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
+resource userSearchServiceContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for userId in userObjectIds: {
+  scope: searchService
+  name: guid(searchService.id, userId, searchServiceContributorRoleId)
+  properties: {
+    principalId: userId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchServiceContributorRoleId)
+    principalType: 'User'
+  }
+}]
+
+var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
+resource userSearchIndexDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for userId in userObjectIds: {
+  scope: searchService
+  name: guid(searchService.id, userId, searchIndexDataContributorRoleId)
+  properties: {
+    principalId: userId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
+    principalType: 'User'
+  }
+}]
