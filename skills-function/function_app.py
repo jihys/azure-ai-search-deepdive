@@ -50,6 +50,24 @@ def _get_openai_client() -> AzureOpenAI:
 # Skill 1: Markdown Header Split
 # ══════════════════════════════════════════════════════════════
 
+def _coerce_text(value) -> str:
+    """DI Layout oneToMany 모드는 markdown을 list로 반환 → 하나로 합칩"""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                # 일부 스킬은 {"content": "..."} 형태로 반환
+                parts.append(str(item.get("content") or item.get("text") or ""))
+            else:
+                parts.append(str(item))
+        return "\n\n<!-- PageBreak -->\n\n".join(p for p in parts if p)
+    return str(value)
+
+
 def _split_by_markdown_headers(text: str, max_chars: int, overlap_chars: int) -> list[str]:
     """
     Markdown 텍스트를 헤더(#, ##, ###) 기준으로 분할.
@@ -171,7 +189,7 @@ def markdown_split(req: func.HttpRequest) -> func.HttpResponse:
     for record in body.get("values", []):
         record_id = record.get("recordId", "")
         data = record.get("data", {})
-        text = data.get("text", "")
+        text = _coerce_text(data.get("text", ""))
         max_chars = int(data.get("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS))
         overlap = int(data.get("overlap_chars", DEFAULT_OVERLAP_CHARS))
 
@@ -196,6 +214,85 @@ def markdown_split(req: func.HttpRequest) -> func.HttpResponse:
         json.dumps({"values": results}),
         status_code=200,
         mimetype="application/json",
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# Skill 1b: PPTX Page Split (slide-level)
+# ══════════════════════════════════════════════════════════════
+
+# DI Layout이 PPTX를 markdown으로 변환할 때 슬라이드 경계에 삽입하는 마커
+_PPTX_PAGE_BREAK_RE = re.compile(r"<!--\s*PageBreak\s*-->", re.IGNORECASE)
+
+
+def _split_by_pptx_pages(text: str, max_chars: int) -> list[str]:
+    """
+    DI Layout markdown의 <!-- PageBreak --> 마커로 PPTX 슬라이드 단위 분할.
+    페이지 마커가 없으면 전체를 한 chunk로 반환.
+    한 슬라이드가 max_chars를 초과하면 char 기반으로 안전 분할.
+    """
+    if not text or not text.strip():
+        return []
+
+    pages = _PPTX_PAGE_BREAK_RE.split(text)
+    pages = [p.strip() for p in pages if p and p.strip()]
+
+    if not pages:
+        return []
+
+    final: list[str] = []
+    for idx, page in enumerate(pages, start=1):
+        # 슬라이드 헤더 부착으로 검색/추적성 개선
+        labeled = f"<!-- Slide {idx} -->\n{page}"
+        if len(labeled) <= max_chars:
+            final.append(labeled)
+        else:
+            final.extend(_split_by_chars(labeled, max_chars, overlap_chars=0))
+    return final
+
+
+@app.route(route="pptx_page_split", methods=["POST"])
+def pptx_page_split(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    AI Search Custom Web API Skill: PPTX 슬라이드(페이지) 단위 분할.
+
+    Input  : { "text": "<DI markdown w/ <!-- PageBreak --> markers>", "max_chunk_chars": 4000 }
+    Output : { "chunks": ["<!-- Slide 1 -->\n...", "<!-- Slide 2 -->\n...", ...] }
+    """
+    try:
+        body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"values": []}), status_code=400, mimetype="application/json"
+        )
+
+    results = []
+    for record in body.get("values", []):
+        record_id = record.get("recordId", "")
+        data = record.get("data", {})
+        text = _coerce_text(data.get("text", ""))
+        # PPTX는 슬라이드당 텍스트가 작아 max를 더 크게 둔다
+        max_chars = int(data.get("max_chunk_chars", 4000))
+
+        try:
+            chunks = _split_by_pptx_pages(text, max_chars)
+            results.append({
+                "recordId": record_id,
+                "data": {"chunks": chunks},
+                "errors": [],
+                "warnings": [],
+            })
+        except Exception as e:
+            logging.error(f"pptx_page_split error for record {record_id}: {e}")
+            results.append({
+                "recordId": record_id,
+                "data": {"chunks": [text] if text else []},
+                "errors": [{"message": str(e)}],
+                "warnings": [],
+            })
+
+    return func.HttpResponse(
+        json.dumps({"values": results}), status_code=200, mimetype="application/json"
     )
 
 
@@ -306,7 +403,7 @@ def verbalize(req: func.HttpRequest) -> func.HttpResponse:
     for record in body.get("values", []):
         record_id = record.get("recordId", "")
         data = record.get("data", {})
-        markdown_text = data.get("markdown_text", "")
+        markdown_text = _coerce_text(data.get("markdown_text", ""))
         file_data = data.get("file_data", {})
 
         # file_data는 AI Search에서 전달하는 base64 인코딩 파일

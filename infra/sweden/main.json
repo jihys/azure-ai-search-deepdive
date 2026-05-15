@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "4673354340591996020"
+      "templateHash": "16277320049470945383"
     }
   },
   "parameters": {
@@ -141,7 +141,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "16464382480178098989"
+              "templateHash": "12049763222891996442"
             }
           },
           "parameters": {
@@ -163,7 +163,8 @@
             "nsgName": "[format('nsg-pep-ragi-{0}', take(parameters('suffix'), 8))]",
             "jumpSubnetName": "snet-jump",
             "pepSubnetName": "snet-pep",
-            "funcSubnetName": "snet-func"
+            "funcSubnetName": "snet-func",
+            "funcFc1SubnetName": "snet-func-fc1"
           },
           "resources": [
             {
@@ -193,7 +194,7 @@
                   {
                     "name": "[variables('jumpSubnetName')]",
                     "properties": {
-                      "addressPrefix": "10.0.0.0/24"
+                      "addressPrefix": "10.0.3.0/24"
                     }
                   },
                   {
@@ -217,6 +218,25 @@
                           "properties": {
                             "serviceName": "Microsoft.Web/serverFarms"
                           }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "[variables('funcFc1SubnetName')]",
+                    "properties": {
+                      "addressPrefix": "10.0.4.0/24",
+                      "delegations": [
+                        {
+                          "name": "delegation-func-fc1",
+                          "properties": {
+                            "serviceName": "Microsoft.App/environments"
+                          }
+                        }
+                      ],
+                      "serviceEndpoints": [
+                        {
+                          "service": "Microsoft.Storage"
                         }
                       ]
                     }
@@ -404,6 +424,31 @@
                 "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]",
                 "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
               ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "privatelink.services.ai.azure.com",
+              "location": "global",
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.services.ai.azure.com', format('link-services-ai-{0}', take(parameters('suffix'), 8)))]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -422,6 +467,10 @@
             "funcSubnetId": {
               "type": "string",
               "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('funcSubnetName'))]"
+            },
+            "funcFc1SubnetId": {
+              "type": "string",
+              "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('funcFc1SubnetName'))]"
             },
             "jumpSubnetId": {
               "type": "string",
@@ -454,6 +503,10 @@
             "vaultDnsZoneId": {
               "type": "string",
               "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
+            },
+            "servicesAiDnsZoneId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')]"
             }
           }
         }
@@ -695,7 +748,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "3999667688799672362"
+              "templateHash": "9969881909232660273"
             }
           },
           "parameters": {
@@ -737,6 +790,13 @@
               "metadata": {
                 "description": "GPT 모델 버전"
               }
+            },
+            "foundryProjectName": {
+              "type": "string",
+              "defaultValue": "proj-ragi-default",
+              "metadata": {
+                "description": "Foundry Agent Service 프로젝트 이름 (Scenario E)"
+              }
             }
           },
           "variables": {
@@ -745,19 +805,24 @@
           "resources": [
             {
               "type": "Microsoft.CognitiveServices/accounts",
-              "apiVersion": "2024-10-01",
+              "apiVersion": "2025-04-01-preview",
               "name": "[variables('accountName')]",
               "location": "[parameters('location')]",
               "kind": "AIServices",
               "sku": {
                 "name": "S0"
               },
+              "identity": {
+                "type": "SystemAssigned"
+              },
               "properties": {
                 "customSubDomainName": "[variables('accountName')]",
                 "publicNetworkAccess": "Disabled",
                 "networkAcls": {
-                  "defaultAction": "Deny"
-                }
+                  "defaultAction": "Deny",
+                  "bypass": "AzureServices"
+                },
+                "allowProjectManagement": true
               },
               "tags": {
                 "project": "rag-indexing-lab"
@@ -801,12 +866,28 @@
                 "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('accountName'), parameters('embeddingDeploymentName'))]",
                 "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
               ]
+            },
+            {
+              "type": "Microsoft.CognitiveServices/accounts/projects",
+              "apiVersion": "2025-04-01-preview",
+              "name": "[format('{0}/{1}', variables('accountName'), parameters('foundryProjectName'))]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "displayName": "RAG Indexing Lab Foundry Project",
+                "description": "Foundry Agent Service project for legal RAG demo (notebook 04 Scenario E)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', variables('accountName'))]"
+              ]
             }
           ],
           "outputs": {
             "endpoint": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('accountName')), '2024-10-01').endpoint]"
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('accountName')), '2025-04-01-preview').endpoint]"
             },
             "accountName": {
               "type": "string",
@@ -819,6 +900,18 @@
             "gptDeploymentName": {
               "type": "string",
               "value": "[parameters('gptDeploymentName')]"
+            },
+            "foundryProjectName": {
+              "type": "string",
+              "value": "[parameters('foundryProjectName')]"
+            },
+            "foundryProjectId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts/projects', variables('accountName'), parameters('foundryProjectName'))]"
+            },
+            "foundryProjectEndpoint": {
+              "type": "string",
+              "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', variables('accountName'), parameters('foundryProjectName'))]"
             }
           }
         }
@@ -948,7 +1041,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "22141203888242243"
+              "templateHash": "16935018094355677126"
             }
           },
           "parameters": {
@@ -991,7 +1084,8 @@
           },
           "variables": {
             "searchServiceName": "[format('search-ragi-{0}', take(parameters('suffix'), 8))]",
-            "storageBlobDataReaderRoleId": "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1",
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe",
+            "storageTableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3",
             "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908"
           },
           "resources": [
@@ -1020,10 +1114,23 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), variables('storageBlobDataReaderRoleId'))]",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), variables('storageBlobDataContributorRoleId'))]",
               "properties": {
                 "principalId": "[reference(resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), '2024-06-01-preview', 'full').identity.principalId]",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataReaderRoleId'))]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Search/searchServices', variables('searchServiceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), variables('storageTableDataContributorRoleId'))]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Search/searchServices', variables('searchServiceName')), '2024-06-01-preview', 'full').identity.principalId]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageTableDataContributorRoleId'))]",
                 "principalType": "ServicePrincipal"
               },
               "dependsOn": [
@@ -1068,6 +1175,72 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "role-search-to-openai",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "aoaiAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment'), '2025-04-01').outputs.accountName.value]"
+          },
+          "aiSearchPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'ai-search-deployment'), '2025-04-01').outputs.searchServicePrincipalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "3451337202875044501"
+            }
+          },
+          "parameters": {
+            "aoaiAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "AOAI 계정 이름 (existing reference)"
+              }
+            },
+            "aiSearchPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Search System-Assigned MSI principalId"
+              }
+            }
+          },
+          "variables": {
+            "openAIUserRoleId": "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aoaiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aoaiAccountName')), parameters('aiSearchPrincipalId'), variables('openAIUserRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('openAIUserRoleId'))]",
+                "principalId": "[parameters('aiSearchPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'ai-search-deployment')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openai-deployment')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
       ]
     },
     {
@@ -1560,6 +1733,312 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
+      "name": "function-crawler-consumption-deployment",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "suffix": {
+            "value": "[parameters('suffix')]"
+          },
+          "funcSubnetId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.funcFc1SubnetId.value]"
+          },
+          "storageAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment'), '2025-04-01').outputs.storageAccountName.value]"
+          },
+          "storageAccountId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment'), '2025-04-01').outputs.storageAccountId.value]"
+          },
+          "blobContainerName": {
+            "value": "[parameters('blobContainerName')]"
+          },
+          "preprocessFunctionAppName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-preprocess-deployment'), '2025-04-01').outputs.funcAppName.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "11751191799658020549"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "배포 리전 (Flex Consumption 지원 리전이어야 함)"
+              }
+            },
+            "suffix": {
+              "type": "string",
+              "metadata": {
+                "description": "리소스 이름 접미사"
+              }
+            },
+            "funcSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Function App VNet integration 서브넷 ID (snet-func, Microsoft.Web/serverFarms 위임)"
+              }
+            },
+            "storageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage Account 이름 (raw/processed + deployment 컨테이너 공용)"
+              }
+            },
+            "storageAccountId": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage Account ID (RBAC 스코프용)"
+              }
+            },
+            "blobContainerName": {
+              "type": "string",
+              "defaultValue": "raw-documents",
+              "metadata": {
+                "description": "Blob (raw) 컨테이너 이름"
+              }
+            },
+            "deploymentContainerName": {
+              "type": "string",
+              "defaultValue": "function-deployments",
+              "metadata": {
+                "description": "FC1 deployment 패키지를 보관할 Blob 컨테이너 이름 (Functions 런타임이 Identity 로 접근)"
+              }
+            },
+            "preprocessFunctionAppName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Preprocess Function App 이름 (PREPROCESS_FUNCTION_URI 자동 구성용). 비우면 직접 설정 필요."
+              }
+            },
+            "instanceMemoryMB": {
+              "type": "int",
+              "defaultValue": 2048,
+              "metadata": {
+                "description": "인스턴스 1개 메모리 (MB). 2048/4096 가능"
+              }
+            },
+            "maximumInstanceCount": {
+              "type": "int",
+              "defaultValue": 40,
+              "metadata": {
+                "description": "최대 동시 인스턴스 수 (자동 스케일 상한)"
+              }
+            }
+          },
+          "variables": {
+            "planName": "[format('asp-crawl-cons-ragi-{0}', take(parameters('suffix'), 8))]",
+            "funcAppName": "[format('func-crawl-cons-ragi-{0}', take(parameters('suffix'), 8))]",
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe",
+            "storageQueueDataContributorRoleId": "974c5e8b-45b9-4653-ba55-5f855dd0fb88",
+            "storageTableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('deploymentContainerName'))]",
+              "properties": {
+                "publicAccess": "None"
+              }
+            },
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2024-04-01",
+              "name": "[variables('planName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "tier": "FlexConsumption",
+                "name": "FC1"
+              },
+              "kind": "functionapp",
+              "properties": {
+                "reserved": true
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2024-04-01",
+              "name": "[variables('funcAppName')]",
+              "location": "[parameters('location')]",
+              "kind": "functionapp,linux",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+                "httpsOnly": true,
+                "virtualNetworkSubnetId": "[parameters('funcSubnetId')]",
+                "vnetRouteAllEnabled": true,
+                "publicNetworkAccess": "Enabled",
+                "functionAppConfig": {
+                  "deployment": {
+                    "storage": {
+                      "type": "blobContainer",
+                      "value": "[format('{0}{1}', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-05-01').primaryEndpoints.blob, parameters('deploymentContainerName'))]",
+                      "authentication": {
+                        "type": "SystemAssignedIdentity"
+                      }
+                    }
+                  },
+                  "scaleAndConcurrency": {
+                    "instanceMemoryMB": "[parameters('instanceMemoryMB')]",
+                    "maximumInstanceCount": "[parameters('maximumInstanceCount')]"
+                  },
+                  "runtime": {
+                    "name": "python",
+                    "version": "3.11"
+                  }
+                },
+                "siteConfig": {
+                  "minTlsVersion": "1.2",
+                  "cors": {
+                    "allowedOrigins": [
+                      "https://portal.azure.com"
+                    ]
+                  },
+                  "appSettings": [
+                    {
+                      "name": "AzureWebJobsStorage__accountName",
+                      "value": "[parameters('storageAccountName')]"
+                    },
+                    {
+                      "name": "AzureWebJobsStorage__credential",
+                      "value": "managedidentity"
+                    },
+                    {
+                      "name": "AZURE_STORAGE_ACCOUNT_NAME",
+                      "value": "[parameters('storageAccountName')]"
+                    },
+                    {
+                      "name": "AZURE_BLOB_CONTAINER_NAME",
+                      "value": "[parameters('blobContainerName')]"
+                    },
+                    {
+                      "name": "CRAWLER_DETAIL_BATCH_SIZE",
+                      "value": "50"
+                    },
+                    {
+                      "name": "CRAWL_DETAIL_WORKERS",
+                      "value": "5"
+                    },
+                    {
+                      "name": "PREPROCESS_TIMEOUT_SECONDS",
+                      "value": "3600"
+                    },
+                    {
+                      "name": "PREPROCESS_FUNCTION_URI",
+                      "value": "[if(empty(parameters('preprocessFunctionAppName')), '', format('https://{0}.azurewebsites.net/api/preprocess', parameters('preprocessFunctionAppName')))]"
+                    }
+                  ]
+                }
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Web/sites', variables('funcAppName')), variables('storageBlobDataContributorRoleId'), 'fc1')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Web/sites', variables('funcAppName')), variables('storageQueueDataContributorRoleId'), 'fc1')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageQueueDataContributorRoleId'))]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Web/sites', variables('funcAppName')), variables('storageTableDataContributorRoleId'), 'fc1')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageTableDataContributorRoleId'))]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "funcAppName": {
+              "type": "string",
+              "value": "[variables('funcAppName')]"
+            },
+            "funcAppHostname": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01').defaultHostName]"
+            },
+            "funcAppId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+            },
+            "funcAppPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]"
+            },
+            "hostingPlanId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]"
+            },
+            "deploymentContainerName": {
+              "type": "string",
+              "value": "[parameters('deploymentContainerName')]"
+            },
+            "orchestratorTriggerUrl": {
+              "type": "string",
+              "value": "[format('https://{0}/api/orchestrators/crawl_preprocess', reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01').defaultHostName)]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-preprocess-deployment')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deployment')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "logic-app-crawl-deployment",
       "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
@@ -1574,14 +2053,14 @@
           "suffix": {
             "value": "[parameters('suffix')]"
           },
-          "crawlFunctionUrl": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-crawler-deployment'), '2025-04-01').outputs.crawlTriggerUrl.value]"
-          },
-          "preprocessFunctionUrl": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-preprocess-deployment'), '2025-04-01').outputs.preprocessTriggerUrl.value]"
+          "orchestratorUrl": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-crawler-consumption-deployment'), '2025-04-01').outputs.orchestratorTriggerUrl.value]"
           },
           "crawlerLimit": {
             "value": "[parameters('crawlerLimit')]"
+          },
+          "detailWorkers": {
+            "value": 20
           }
         },
         "template": {
@@ -1591,7 +2070,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "2852754785927449942"
+              "templateHash": "6031371046613242490"
             }
           },
           "parameters": {
@@ -1607,23 +2086,45 @@
                 "description": "리소스 이름 접미사"
               }
             },
-            "crawlFunctionUrl": {
+            "orchestratorUrl": {
               "type": "string",
               "metadata": {
-                "description": "호출할 크롤 Function HTTP 트리거 URL (/api/crawl)"
-              }
-            },
-            "preprocessFunctionUrl": {
-              "type": "string",
-              "metadata": {
-                "description": "호출할 Preprocess Function HTTP 트리거 URL (/api/preprocess)"
+                "description": "Durable Functions HTTP starter URL (예: https://func-app/api/orchestrators/crawl_preprocess)"
               }
             },
             "crawlerLimit": {
               "type": "int",
               "defaultValue": 0,
               "metadata": {
-                "description": "수집할 법령 건수 (0 = 무제한)"
+                "description": "수집할 법령 페이지 수 (0 = 무제한)"
+              }
+            },
+            "detailWorkers": {
+              "type": "int",
+              "defaultValue": 20,
+              "metadata": {
+                "description": "상세 페이지 병렬 워커 수 (단일 Activity 내) — Consumption 자동 스케일과 결합되어 동시성 ↑"
+              }
+            },
+            "pollIntervalSeconds": {
+              "type": "int",
+              "defaultValue": 30,
+              "metadata": {
+                "description": "폴링 간격 (초)"
+              }
+            },
+            "pollMaxDuration": {
+              "type": "string",
+              "defaultValue": "PT4H",
+              "metadata": {
+                "description": "최대 폴링 대기 시간 (ISO 8601 duration)"
+              }
+            },
+            "pollMaxIterations": {
+              "type": "int",
+              "defaultValue": 480,
+              "metadata": {
+                "description": "최대 폴링 횟수 (Until loop 안전 상한)"
               }
             }
           },
@@ -1662,7 +2163,7 @@
                         "timeZone": "UTC"
                       },
                       "metadata": {
-                        "description": "06:00 KST - crawl + preprocess pipeline"
+                        "description": "06:00 KST - Durable orchestrator (crawl + preprocess)"
                       }
                     }
                   },
@@ -1680,150 +2181,119 @@
                       },
                       "runAfter": {}
                     },
-                    "Call_Crawl_Function_All_Sources": {
+                    "Start_Orchestration": {
                       "type": "Http",
                       "inputs": {
                         "method": "POST",
-                        "uri": "[parameters('crawlFunctionUrl')]",
+                        "uri": "[parameters('orchestratorUrl')]",
                         "headers": {
                           "Content-Type": "application/json"
                         },
                         "body": {
                           "source": "all",
                           "max_pages": "[parameters('crawlerLimit')]",
-                          "detail_workers": 5,
-                          "triggered_by": "logic-app-crawl-preprocess"
+                          "detail_workers": "[parameters('detailWorkers')]",
+                          "triggered_by": "logic-app-durable",
+                          "crawl_date": "@{variables('crawlDate')}",
+                          "skip_preprocess": false
                         },
                         "retryPolicy": {
                           "type": "fixed",
                           "count": 3,
-                          "interval": "PT1M"
+                          "interval": "PT30S"
                         }
                       },
+                      "operationOptions": "DisableAsyncPattern",
                       "runAfter": {
                         "Initialize_Today_Date": [
                           "Succeeded"
                         ]
                       },
-                      "limit": {
-                        "timeout": "PT2H"
-                      },
                       "metadata": {
-                        "description": "crawl Function - all 4 sources (prec/detc/expc/admrul)"
+                        "description": "Durable Functions HTTP starter — returns 202 + statusQueryGetUri (async polling disabled)"
                       }
                     },
-                    "Check_Crawl_Success": {
-                      "type": "If",
-                      "expression": {
-                        "and": [
+                    "Initialize_Status_Url": {
+                      "type": "InitializeVariable",
+                      "inputs": {
+                        "variables": [
                           {
-                            "equals": [
-                              "@body('Call_Crawl_Function_All_Sources')?['status']",
-                              "success"
-                            ]
+                            "name": "statusUrl",
+                            "type": "string",
+                            "value": "@{body('Start_Orchestration')?['statusQueryGetUri']}"
                           }
                         ]
                       },
+                      "runAfter": {
+                        "Start_Orchestration": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Initialize_Status_Body": {
+                      "type": "InitializeVariable",
+                      "inputs": {
+                        "variables": [
+                          {
+                            "name": "orchestrationStatus",
+                            "type": "object",
+                            "value": {
+                              "runtimeStatus": "Pending"
+                            }
+                          }
+                        ]
+                      },
+                      "runAfter": {
+                        "Initialize_Status_Url": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Until_Completed": {
+                      "type": "Until",
+                      "expression": "@contains(createArray('Completed','Failed','Terminated','Canceled'), variables('orchestrationStatus')?['runtimeStatus'])",
+                      "limit": {
+                        "count": "[parameters('pollMaxIterations')]",
+                        "timeout": "[parameters('pollMaxDuration')]"
+                      },
                       "actions": {
-                        "Parallel_Preprocess_Sources": {
-                          "type": "Scope",
-                          "actions": {
-                            "Preprocess_Prec": {
-                              "type": "Http",
-                              "inputs": {
-                                "method": "POST",
-                                "uri": "[parameters('preprocessFunctionUrl')]",
-                                "headers": {
-                                  "Content-Type": "application/json"
-                                },
-                                "body": {
-                                  "source": "prec",
-                                  "crawl_date": "@{variables('crawlDate')}",
-                                  "triggered_by": "logic-app-crawl-preprocess"
-                                }
-                              },
-                              "limit": {
-                                "timeout": "PT1H"
-                              },
-                              "metadata": {
-                                "description": "prec JSON -> JSONL"
-                              }
-                            },
-                            "Preprocess_Detc": {
-                              "type": "Http",
-                              "inputs": {
-                                "method": "POST",
-                                "uri": "[parameters('preprocessFunctionUrl')]",
-                                "headers": {
-                                  "Content-Type": "application/json"
-                                },
-                                "body": {
-                                  "source": "detc",
-                                  "crawl_date": "@{variables('crawlDate')}",
-                                  "triggered_by": "logic-app-crawl-preprocess"
-                                }
-                              },
-                              "limit": {
-                                "timeout": "PT1H"
-                              },
-                              "metadata": {
-                                "description": "detc JSON -> JSONL"
-                              }
-                            },
-                            "Preprocess_Expc": {
-                              "type": "Http",
-                              "inputs": {
-                                "method": "POST",
-                                "uri": "[parameters('preprocessFunctionUrl')]",
-                                "headers": {
-                                  "Content-Type": "application/json"
-                                },
-                                "body": {
-                                  "source": "expc",
-                                  "crawl_date": "@{variables('crawlDate')}",
-                                  "triggered_by": "logic-app-crawl-preprocess"
-                                }
-                              },
-                              "limit": {
-                                "timeout": "PT1H"
-                              },
-                              "metadata": {
-                                "description": "expc JSON -> JSONL"
-                              }
-                            },
-                            "Preprocess_Admrul": {
-                              "type": "Http",
-                              "inputs": {
-                                "method": "POST",
-                                "uri": "[parameters('preprocessFunctionUrl')]",
-                                "headers": {
-                                  "Content-Type": "application/json"
-                                },
-                                "body": {
-                                  "source": "admrul",
-                                  "crawl_date": "@{variables('crawlDate')}",
-                                  "triggered_by": "logic-app-crawl-preprocess"
-                                }
-                              },
-                              "limit": {
-                                "timeout": "PT1H"
-                              },
-                              "metadata": {
-                                "description": "admrul JSON -> JSONL"
-                              }
+                        "Wait_Poll_Interval": {
+                          "type": "Wait",
+                          "inputs": {
+                            "interval": {
+                              "count": "[parameters('pollIntervalSeconds')]",
+                              "unit": "Second"
                             }
                           },
-                          "runAfter": {},
-                          "metadata": {
-                            "description": "4-source parallel preprocess (Integration: JSON -> JSONL)"
+                          "runAfter": {}
+                        },
+                        "Get_Orchestration_Status": {
+                          "type": "Http",
+                          "inputs": {
+                            "method": "GET",
+                            "uri": "@variables('statusUrl')"
+                          },
+                          "runAfter": {
+                            "Wait_Poll_Interval": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Update_Status": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "orchestrationStatus",
+                            "value": "@body('Get_Orchestration_Status')"
+                          },
+                          "runAfter": {
+                            "Get_Orchestration_Status": [
+                              "Succeeded"
+                            ]
                           }
                         }
                       },
-                      "else": {
-                        "actions": {}
-                      },
                       "runAfter": {
-                        "Call_Crawl_Function_All_Sources": [
+                        "Initialize_Status_Body": [
                           "Succeeded"
                         ]
                       }
@@ -1833,24 +2303,48 @@
                       "inputs": {
                         "completedAt": "@{utcNow()}",
                         "crawlDate": "@{variables('crawlDate')}",
-                        "crawlStatus": "@{body('Call_Crawl_Function_All_Sources')?['status']}",
-                        "crawlResult": "@body('Call_Crawl_Function_All_Sources')",
-                        "preprocessResults": {
-                          "prec": "@body('Preprocess_Prec')",
-                          "detc": "@body('Preprocess_Detc')",
-                          "expc": "@body('Preprocess_Expc')",
-                          "admrul": "@body('Preprocess_Admrul')"
-                        }
+                        "runtimeStatus": "@{variables('orchestrationStatus')?['runtimeStatus']}",
+                        "instanceId": "@{variables('orchestrationStatus')?['instanceId']}",
+                        "createdTime": "@{variables('orchestrationStatus')?['createdTime']}",
+                        "lastUpdatedTime": "@{variables('orchestrationStatus')?['lastUpdatedTime']}",
+                        "output": "@variables('orchestrationStatus')?['output']"
                       },
                       "runAfter": {
-                        "Check_Crawl_Success": [
-                          "Succeeded",
-                          "Failed",
-                          "Skipped"
+                        "Until_Completed": [
+                          "Succeeded"
                         ]
                       },
                       "metadata": {
-                        "description": "final pipeline result log (crawl + 4-source preprocess)"
+                        "description": "final pipeline result (Durable orchestrator output)"
+                      }
+                    },
+                    "Check_Final_Status": {
+                      "type": "If",
+                      "expression": {
+                        "not": {
+                          "equals": [
+                            "@variables('orchestrationStatus')?['runtimeStatus']",
+                            "Completed"
+                          ]
+                        }
+                      },
+                      "actions": {
+                        "Terminate_With_Failure": {
+                          "type": "Terminate",
+                          "inputs": {
+                            "runStatus": "Failed",
+                            "runError": {
+                              "code": "OrchestrationFailed",
+                              "message": "Durable orchestration ended with non-Completed status: @{variables('orchestrationStatus')?['runtimeStatus']}"
+                            }
+                          },
+                          "runAfter": {}
+                        }
+                      },
+                      "runAfter": {
+                        "Log_Pipeline_Completion": [
+                          "Succeeded"
+                        ]
                       }
                     }
                   }
@@ -1875,8 +2369,7 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-crawler-deployment')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-preprocess-deployment')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'function-crawler-consumption-deployment')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
       ]
     },
@@ -2205,6 +2698,9 @@
           },
           "vaultDnsZoneId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.vaultDnsZoneId.value]"
+          },
+          "servicesAiDnsZoneId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vnet-deployment'), '2025-04-01').outputs.servicesAiDnsZoneId.value]"
           }
         },
         "template": {
@@ -2214,7 +2710,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "13724224604013822509"
+              "templateHash": "3995891367309519984"
             }
           },
           "parameters": {
@@ -2312,6 +2808,12 @@
               "type": "string",
               "metadata": {
                 "description": "Key Vault Private DNS Zone ID"
+              }
+            },
+            "servicesAiDnsZoneId": {
+              "type": "string",
+              "metadata": {
+                "description": "Foundry Agent Service (services.ai.azure.com) Private DNS Zone ID"
               }
             }
           },
@@ -2443,6 +2945,12 @@
                     "name": "openai",
                     "properties": {
                       "privateDnsZoneId": "[parameters('openaiDnsZoneId')]"
+                    }
+                  },
+                  {
+                    "name": "services-ai",
+                    "properties": {
+                      "privateDnsZoneId": "[parameters('servicesAiDnsZoneId')]"
                     }
                   }
                 ]

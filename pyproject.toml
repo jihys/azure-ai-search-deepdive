@@ -17,6 +17,9 @@ dependencies = [
     "azure-mgmt-resource>=23.0.0",
     "azure-mgmt-logic>=10.0.0",
     "ipykernel>=6.29.0",
+    # Azure AI Foundry Agent Service (Scenario E in notebook 04)
+    "azure-ai-projects>=1.0.0b10",
+    "azure-ai-agents>=1.0.0b3",
 ]
 
 [project.optional-dependencies]

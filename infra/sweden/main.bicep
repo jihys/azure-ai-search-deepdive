@@ -133,6 +133,16 @@ module aiSearch 'modules/ai-search.bicep' = {
   }
 }
 
+// AI Search MSI → AOAI RBAC (skillset 의 AzureOpenAIEmbeddingSkill MSI auth)
+module searchToOpenAIRole 'modules/role-search-to-openai.bicep' = {
+  scope: rg
+  name: 'role-search-to-openai'
+  params: {
+    aoaiAccountName: openai.outputs.accountName
+    aiSearchPrincipalId: aiSearch.outputs.searchServicePrincipalId
+  }
+}
+
 // ============================================
 // Azure Function App (크롤러) - EP1 + VNet Integration
 // Python 크롤러를 Azure에서 실행 (로컬 실행 대체)
@@ -172,6 +182,26 @@ module functionPreprocess 'modules/function-preprocess.bicep' = {
 }
 
 // ============================================
+// Azure Function App (Crawler, Flex Consumption FC1)
+// Method B: Durable Functions + Activity 분할
+//   - 기존 EP1 functionCrawler 와 병렬 배포 (이름 다름)
+//   - identity-based deployment storage + VNet integration (snet-func 공유)
+// ============================================
+module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' = {
+  scope: rg
+  name: 'function-crawler-consumption-deployment'
+  params: {
+    location: location
+    suffix: suffix
+    funcSubnetId: vnet.outputs.funcFc1SubnetId
+    storageAccountName: storage.outputs.storageAccountName
+    storageAccountId: storage.outputs.storageAccountId
+    blobContainerName: blobContainerName
+    preprocessFunctionAppName: functionPreprocess.outputs.funcAppName
+  }
+}
+
+// ============================================
 // Logic App (Consumption) - 크롤 + 전처리 통합 스케줄러
 // 매일 21:00 UTC (= 06:00 KST)
 //   Call_Crawl_Function → Parallel preprocess (prec/detc/expc/admrul)
@@ -182,9 +212,9 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
   params: {
     location: location
     suffix: suffix
-    crawlFunctionUrl: functionCrawler.outputs.crawlTriggerUrl
-    preprocessFunctionUrl: functionPreprocess.outputs.preprocessTriggerUrl
+    orchestratorUrl: functionCrawlerConsumption.outputs.orchestratorTriggerUrl
     crawlerLimit: crawlerLimit
+    detailWorkers: 20
   }
 }
 
@@ -233,6 +263,7 @@ module privateEndpoints 'modules/private-endpoints.bicep' = {
     azuremlDnsZoneId: vnet.outputs.azuremlDnsZoneId
     notebooksDnsZoneId: vnet.outputs.notebooksDnsZoneId
     vaultDnsZoneId: vnet.outputs.vaultDnsZoneId
+    servicesAiDnsZoneId: vnet.outputs.servicesAiDnsZoneId
   }
 }
 

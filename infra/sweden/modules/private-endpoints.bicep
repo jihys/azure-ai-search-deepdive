@@ -51,6 +51,9 @@ param notebooksDnsZoneId string
 @description('Key Vault Private DNS Zone ID')
 param vaultDnsZoneId string
 
+@description('Foundry Agent Service (services.ai.azure.com) Private DNS Zone ID')
+param servicesAiDnsZoneId string
+
 // ── Storage Blob Private Endpoint ──
 resource storageBlobPe 'Microsoft.Network/privateEndpoints@2024-01-01' = {
   name: 'pe-blob-ragi-${take(suffix, 8)}'
@@ -147,6 +150,10 @@ resource aiServicesDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGr
       {
         name: 'openai'
         properties: { privateDnsZoneId: openaiDnsZoneId }
+      }
+      {
+        name: 'services-ai'
+        properties: { privateDnsZoneId: servicesAiDnsZoneId }
       }
     ]
   }

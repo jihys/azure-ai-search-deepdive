@@ -163,6 +163,17 @@ def _text(name: str) -> dict:
     return {"name": name, "type": "Edm.String", "searchable": True, "analyzer": "ko.microsoft"}
 
 
+def _text_long(name: str) -> dict:
+    """장문 용 텍스트 필드 — custom analyzer 'ko_safe'.
+    fullText 처럼 매우 긴 본문을 색인할 때 사용.
+    32K byte 단일 토큰 한도 회피를 위해 filterable/sortable/facetable 을 모두 비활성."""
+    return {
+        "name": name, "type": "Edm.String",
+        "searchable": True, "analyzer": "ko_safe",
+        "filterable": False, "sortable": False, "facetable": False,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════
 # 1. 판례 (prec) → prec-court-index
 # ══════════════════════════════════════════════════════════════════
@@ -195,7 +206,7 @@ PREC_CONFIG = {
         _text("caseName"),
         _text("holdings"),
         _text("summary"),
-        _text("fullText"),
+        _text_long("fullText"),
         # 벡터
         _vector_field(),
     ],
@@ -239,7 +250,7 @@ CONST_CONFIG = {
         _text("caseName"),
         _text("holdings"),
         _text("summary"),
-        _text("fullText"),
+        _text_long("fullText"),
         _vector_field(),
     ],
     "field_mappings": [
@@ -279,7 +290,7 @@ INTERP_CONFIG = {
         _text("title"),
         _text("querySummary"),
         _text("reply"),
-        _text("reason"),
+        _text_long("reason"),
         _vector_field(),
     ],
     "field_mappings": [
@@ -320,7 +331,7 @@ ADMIN_CONFIG = {
         _text("caseName"),
         _text("order"),
         _text("reasonSummary"),
-        _text("fullText"),
+        _text_long("fullText"),
         _vector_field(),
     ],
     "field_mappings": [
@@ -362,6 +373,41 @@ def create_index(cfg: dict) -> None:
             cfg["semantic_content"],
             cfg["semantic_keywords"],
         ),
+        # ko_safe custom analyzer:
+        #   원문 그대로 저장 → 색인 시 한자/가나 제거 + 긴 런 분할 → 한국어 형태소
+        #   ko.microsoft 의 32K byte 단일 토큰 한계 회피
+        "analyzers": [
+            {
+                "@odata.type": "#Microsoft.Azure.Search.CustomAnalyzer",
+                "name": "ko_safe",
+                "tokenizer": "microsoft_korean_tok",
+                "charFilters": ["strip_cjk", "split_long_runs"],
+                "tokenFilters": ["lowercase"],
+            },
+        ],
+        "charFilters": [
+            {
+                "@odata.type": "#Microsoft.Azure.Search.PatternReplaceCharFilter",
+                "name": "strip_cjk",
+                "pattern": "[\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uF900-\\uFAFF\\u3040-\\u309F\\u30A0-\\u30FF]+",
+                "replacement": " ",
+            },
+            {
+                "@odata.type": "#Microsoft.Azure.Search.PatternReplaceCharFilter",
+                "name": "split_long_runs",
+                "pattern": "(\\S{200})(?=\\S)",
+                "replacement": "$1 ",
+            },
+        ],
+        "tokenizers": [
+            {
+                "@odata.type": "#Microsoft.Azure.Search.MicrosoftLanguageTokenizer",
+                "name": "microsoft_korean_tok",
+                "language": "korean",
+                "isSearchTokenizer": False,
+                "maxTokenLength": 200,
+            },
+        ],
     })
     print(f"  ✓ Index '{name}' 생성 완료")
 
@@ -374,6 +420,24 @@ def create_skillset(cfg: dict) -> None:
         "name": name,
         "description": f"{cfg['index_name']} 임베딩 파이프라인",
         "skills": [
+            # 1) 임베딩 입력이 8000 토큰을 초과하면 AzureOpenAIEmbeddingSkill 가 실패하므로
+            #    먼저 SplitSkill 로 분할 (페이지 단위, ~12000 chars ≈ 7K-8K tokens 한국어 기준)
+            {
+                "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+                "name": "split-skill",
+                "description": "임베딩 입력 길이 제한 회피 (8K token)",
+                "context": "/document",
+                "textSplitMode": "pages",
+                "maximumPageLength": 5000,
+                "defaultLanguageCode": "ko",
+                "inputs": [
+                    {"name": "text", "source": cfg["embedding_source_field"]},
+                ],
+                "outputs": [
+                    {"name": "textItems", "targetName": "embedSourcePages"},
+                ],
+            },
+            # 2) 첫 페이지만 임베딩 (요약/회답 필드는 본질적으로 짧음 — 초과는 예외 케이스)
             {
                 "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
                 "name": "embedding-skill",
@@ -384,7 +448,7 @@ def create_skillset(cfg: dict) -> None:
                 "modelName": "text-embedding-3-large",
                 "dimensions": 3072,
                 "inputs": [
-                    {"name": "text", "source": cfg["embedding_source_field"]},
+                    {"name": "text", "source": "/document/embedSourcePages/0"},
                 ],
                 "outputs": [
                     {"name": "embedding", "targetName": "summaryEmbedding"},
@@ -428,8 +492,8 @@ def create_indexer(cfg: dict, schedule: str, start_time: str) -> None:
         "targetIndexName": cfg["index_name"],
         "parameters": {
             "batchSize": 50,
-            "maxFailedItems": 500,
-            "maxFailedItemsPerBatch": 100,
+            "maxFailedItems": 5000,
+            "maxFailedItemsPerBatch": 1000,
             "configuration": {
                 "dataToExtract": "contentAndMetadata",
                 "parsingMode": "jsonLines",
@@ -440,6 +504,12 @@ def create_indexer(cfg: dict, schedule: str, start_time: str) -> None:
             {"sourceFieldName": "/document/summaryEmbedding", "targetFieldName": "summaryEmbedding"},
         ],
     }
+    # Incremental enrichment cache (옵션): SETUP_ENABLE_CACHE=1 인 경우만 활성화
+    if os.environ.get("SETUP_ENABLE_CACHE") == "1":
+        indexer["cache"] = {
+            "storageConnectionString": f"ResourceId={STORAGE_RESOURCE_ID};",
+            "enableReprocessing": True,
+        }
 
     if schedule.lower() != "none":
         indexer["schedule"] = {
@@ -528,10 +598,7 @@ def main() -> None:
         print(f"  [{source_key}] {cfg['index_name']}")
         print(f"{'─' * 60}")
 
-        create_index(cfg)
-        create_skillset(cfg)
-
-        # Indexer reset 먼저 (change tracking state가 있으면 datasource 삭제 불가)
+        # Indexer reset 먼저 (cache/change tracking이 있으면 skillset/datasource 변경 불가)
         indexer_name = cfg["indexer_name"]
         reset_url = f"{SEARCH_ENDPOINT}/indexers/{indexer_name}/reset?api-version={API_VERSION}"
         reset_resp = requests.post(reset_url, headers=_headers(), json={}, timeout=120)
@@ -542,6 +609,8 @@ def main() -> None:
         else:
             print(f"  - Indexer reset skip: {reset_resp.status_code}")
 
+        create_index(cfg)
+        create_skillset(cfg)
         create_datasource(cfg)
         create_indexer(cfg, schedule=args.schedule, start_time=args.start_time)
 

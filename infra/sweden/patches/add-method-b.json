@@ -1,0 +1,704 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.43.8.12551",
+      "templateHash": "135052180827362144"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "suffix": {
+      "type": "string",
+      "defaultValue": "dyn6dtfu"
+    },
+    "funcSubnetId": {
+      "type": "string"
+    },
+    "storageAccountName": {
+      "type": "string"
+    },
+    "storageAccountId": {
+      "type": "string"
+    },
+    "preprocessFunctionAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "기존 preprocess Function App 이름 (FC1 의 PREPROCESS_FUNCTION_URI 자동 구성용)"
+      }
+    },
+    "detailWorkers": {
+      "type": "int",
+      "defaultValue": 20,
+      "metadata": {
+        "description": "Detail 페이지 동시 요청 워커 수"
+      }
+    },
+    "crawlerLimit": {
+      "type": "int",
+      "defaultValue": 10,
+      "metadata": {
+        "description": "수집할 페이지 수 (0=무제한). 일일 incremental 은 10 권장 (소스당 ~1000개 신규 항목 검사)."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "function-crawler-consumption-patch",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "suffix": {
+            "value": "[parameters('suffix')]"
+          },
+          "funcSubnetId": {
+            "value": "[parameters('funcSubnetId')]"
+          },
+          "storageAccountName": {
+            "value": "[parameters('storageAccountName')]"
+          },
+          "storageAccountId": {
+            "value": "[parameters('storageAccountId')]"
+          },
+          "blobContainerName": {
+            "value": "raw-documents"
+          },
+          "preprocessFunctionAppName": {
+            "value": "[parameters('preprocessFunctionAppName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "11751191799658020549"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "배포 리전 (Flex Consumption 지원 리전이어야 함)"
+              }
+            },
+            "suffix": {
+              "type": "string",
+              "metadata": {
+                "description": "리소스 이름 접미사"
+              }
+            },
+            "funcSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Function App VNet integration 서브넷 ID (snet-func, Microsoft.Web/serverFarms 위임)"
+              }
+            },
+            "storageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage Account 이름 (raw/processed + deployment 컨테이너 공용)"
+              }
+            },
+            "storageAccountId": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage Account ID (RBAC 스코프용)"
+              }
+            },
+            "blobContainerName": {
+              "type": "string",
+              "defaultValue": "raw-documents",
+              "metadata": {
+                "description": "Blob (raw) 컨테이너 이름"
+              }
+            },
+            "deploymentContainerName": {
+              "type": "string",
+              "defaultValue": "function-deployments",
+              "metadata": {
+                "description": "FC1 deployment 패키지를 보관할 Blob 컨테이너 이름 (Functions 런타임이 Identity 로 접근)"
+              }
+            },
+            "preprocessFunctionAppName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Preprocess Function App 이름 (PREPROCESS_FUNCTION_URI 자동 구성용). 비우면 직접 설정 필요."
+              }
+            },
+            "instanceMemoryMB": {
+              "type": "int",
+              "defaultValue": 2048,
+              "metadata": {
+                "description": "인스턴스 1개 메모리 (MB). 2048/4096 가능"
+              }
+            },
+            "maximumInstanceCount": {
+              "type": "int",
+              "defaultValue": 40,
+              "metadata": {
+                "description": "최대 동시 인스턴스 수 (자동 스케일 상한)"
+              }
+            }
+          },
+          "variables": {
+            "planName": "[format('asp-crawl-cons-ragi-{0}', take(parameters('suffix'), 8))]",
+            "funcAppName": "[format('func-crawl-cons-ragi-{0}', take(parameters('suffix'), 8))]",
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe",
+            "storageQueueDataContributorRoleId": "974c5e8b-45b9-4653-ba55-5f855dd0fb88",
+            "storageTableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('deploymentContainerName'))]",
+              "properties": {
+                "publicAccess": "None"
+              }
+            },
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2024-04-01",
+              "name": "[variables('planName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "tier": "FlexConsumption",
+                "name": "FC1"
+              },
+              "kind": "functionapp",
+              "properties": {
+                "reserved": true
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2024-04-01",
+              "name": "[variables('funcAppName')]",
+              "location": "[parameters('location')]",
+              "kind": "functionapp,linux",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+                "httpsOnly": true,
+                "virtualNetworkSubnetId": "[parameters('funcSubnetId')]",
+                "vnetRouteAllEnabled": true,
+                "publicNetworkAccess": "Enabled",
+                "functionAppConfig": {
+                  "deployment": {
+                    "storage": {
+                      "type": "blobContainer",
+                      "value": "[format('{0}{1}', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-05-01').primaryEndpoints.blob, parameters('deploymentContainerName'))]",
+                      "authentication": {
+                        "type": "SystemAssignedIdentity"
+                      }
+                    }
+                  },
+                  "scaleAndConcurrency": {
+                    "instanceMemoryMB": "[parameters('instanceMemoryMB')]",
+                    "maximumInstanceCount": "[parameters('maximumInstanceCount')]"
+                  },
+                  "runtime": {
+                    "name": "python",
+                    "version": "3.11"
+                  }
+                },
+                "siteConfig": {
+                  "minTlsVersion": "1.2",
+                  "cors": {
+                    "allowedOrigins": [
+                      "https://portal.azure.com"
+                    ]
+                  },
+                  "appSettings": [
+                    {
+                      "name": "AzureWebJobsStorage__accountName",
+                      "value": "[parameters('storageAccountName')]"
+                    },
+                    {
+                      "name": "AzureWebJobsStorage__credential",
+                      "value": "managedidentity"
+                    },
+                    {
+                      "name": "AZURE_STORAGE_ACCOUNT_NAME",
+                      "value": "[parameters('storageAccountName')]"
+                    },
+                    {
+                      "name": "AZURE_BLOB_CONTAINER_NAME",
+                      "value": "[parameters('blobContainerName')]"
+                    },
+                    {
+                      "name": "CRAWLER_DETAIL_BATCH_SIZE",
+                      "value": "50"
+                    },
+                    {
+                      "name": "CRAWL_DETAIL_WORKERS",
+                      "value": "5"
+                    },
+                    {
+                      "name": "PREPROCESS_TIMEOUT_SECONDS",
+                      "value": "3600"
+                    },
+                    {
+                      "name": "PREPROCESS_FUNCTION_URI",
+                      "value": "[if(empty(parameters('preprocessFunctionAppName')), '', format('https://{0}.azurewebsites.net/api/preprocess', parameters('preprocessFunctionAppName')))]"
+                    }
+                  ]
+                }
+              },
+              "tags": {
+                "project": "rag-indexing-lab"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Web/sites', variables('funcAppName')), variables('storageBlobDataContributorRoleId'), 'fc1')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Web/sites', variables('funcAppName')), variables('storageQueueDataContributorRoleId'), 'fc1')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageQueueDataContributorRoleId'))]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(parameters('storageAccountId'), resourceId('Microsoft.Web/sites', variables('funcAppName')), variables('storageTableDataContributorRoleId'), 'fc1')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageTableDataContributorRoleId'))]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "funcAppName": {
+              "type": "string",
+              "value": "[variables('funcAppName')]"
+            },
+            "funcAppHostname": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01').defaultHostName]"
+            },
+            "funcAppId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', variables('funcAppName'))]"
+            },
+            "funcAppPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01', 'full').identity.principalId]"
+            },
+            "hostingPlanId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]"
+            },
+            "deploymentContainerName": {
+              "type": "string",
+              "value": "[parameters('deploymentContainerName')]"
+            },
+            "orchestratorTriggerUrl": {
+              "type": "string",
+              "value": "[format('https://{0}/api/orchestrators/crawl_preprocess', reference(resourceId('Microsoft.Web/sites', variables('funcAppName')), '2024-04-01').defaultHostName)]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "logic-app-crawl-patch-method-b",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "suffix": {
+            "value": "[parameters('suffix')]"
+          },
+          "orchestratorUrl": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-crawler-consumption-patch'), '2025-04-01').outputs.orchestratorTriggerUrl.value]"
+          },
+          "crawlerLimit": {
+            "value": "[parameters('crawlerLimit')]"
+          },
+          "detailWorkers": {
+            "value": "[parameters('detailWorkers')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "6031371046613242490"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "배포 리전"
+              }
+            },
+            "suffix": {
+              "type": "string",
+              "metadata": {
+                "description": "리소스 이름 접미사"
+              }
+            },
+            "orchestratorUrl": {
+              "type": "string",
+              "metadata": {
+                "description": "Durable Functions HTTP starter URL (예: https://func-app/api/orchestrators/crawl_preprocess)"
+              }
+            },
+            "crawlerLimit": {
+              "type": "int",
+              "defaultValue": 0,
+              "metadata": {
+                "description": "수집할 법령 페이지 수 (0 = 무제한)"
+              }
+            },
+            "detailWorkers": {
+              "type": "int",
+              "defaultValue": 20,
+              "metadata": {
+                "description": "상세 페이지 병렬 워커 수 (단일 Activity 내) — Consumption 자동 스케일과 결합되어 동시성 ↑"
+              }
+            },
+            "pollIntervalSeconds": {
+              "type": "int",
+              "defaultValue": 30,
+              "metadata": {
+                "description": "폴링 간격 (초)"
+              }
+            },
+            "pollMaxDuration": {
+              "type": "string",
+              "defaultValue": "PT4H",
+              "metadata": {
+                "description": "최대 폴링 대기 시간 (ISO 8601 duration)"
+              }
+            },
+            "pollMaxIterations": {
+              "type": "int",
+              "defaultValue": 480,
+              "metadata": {
+                "description": "최대 폴링 횟수 (Until loop 안전 상한)"
+              }
+            }
+          },
+          "variables": {
+            "workflowName": "[format('logic-crawl-ragi-{0}', take(parameters('suffix'), 8))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Logic/workflows",
+              "apiVersion": "2019-05-01",
+              "name": "[variables('workflowName')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "state": "Enabled",
+                "definition": {
+                  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {},
+                  "triggers": {
+                    "Daily_Schedule_Crawl_and_Preprocess": {
+                      "type": "Recurrence",
+                      "recurrence": {
+                        "frequency": "Day",
+                        "interval": 1,
+                        "schedule": {
+                          "hours": [
+                            "21"
+                          ],
+                          "minutes": [
+                            0
+                          ]
+                        },
+                        "timeZone": "UTC"
+                      },
+                      "metadata": {
+                        "description": "06:00 KST - Durable orchestrator (crawl + preprocess)"
+                      }
+                    }
+                  },
+                  "actions": {
+                    "Initialize_Today_Date": {
+                      "type": "InitializeVariable",
+                      "inputs": {
+                        "variables": [
+                          {
+                            "name": "crawlDate",
+                            "type": "string",
+                            "value": "@{formatDateTime(utcNow(), 'yyyy-MM-dd')}"
+                          }
+                        ]
+                      },
+                      "runAfter": {}
+                    },
+                    "Start_Orchestration": {
+                      "type": "Http",
+                      "inputs": {
+                        "method": "POST",
+                        "uri": "[parameters('orchestratorUrl')]",
+                        "headers": {
+                          "Content-Type": "application/json"
+                        },
+                        "body": {
+                          "source": "all",
+                          "max_pages": "[parameters('crawlerLimit')]",
+                          "detail_workers": "[parameters('detailWorkers')]",
+                          "triggered_by": "logic-app-durable",
+                          "crawl_date": "@{variables('crawlDate')}",
+                          "skip_preprocess": false
+                        },
+                        "retryPolicy": {
+                          "type": "fixed",
+                          "count": 3,
+                          "interval": "PT30S"
+                        }
+                      },
+                      "operationOptions": "DisableAsyncPattern",
+                      "runAfter": {
+                        "Initialize_Today_Date": [
+                          "Succeeded"
+                        ]
+                      },
+                      "metadata": {
+                        "description": "Durable Functions HTTP starter — returns 202 + statusQueryGetUri (async polling disabled)"
+                      }
+                    },
+                    "Initialize_Status_Url": {
+                      "type": "InitializeVariable",
+                      "inputs": {
+                        "variables": [
+                          {
+                            "name": "statusUrl",
+                            "type": "string",
+                            "value": "@{body('Start_Orchestration')?['statusQueryGetUri']}"
+                          }
+                        ]
+                      },
+                      "runAfter": {
+                        "Start_Orchestration": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Initialize_Status_Body": {
+                      "type": "InitializeVariable",
+                      "inputs": {
+                        "variables": [
+                          {
+                            "name": "orchestrationStatus",
+                            "type": "object",
+                            "value": {
+                              "runtimeStatus": "Pending"
+                            }
+                          }
+                        ]
+                      },
+                      "runAfter": {
+                        "Initialize_Status_Url": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Until_Completed": {
+                      "type": "Until",
+                      "expression": "@contains(createArray('Completed','Failed','Terminated','Canceled'), variables('orchestrationStatus')?['runtimeStatus'])",
+                      "limit": {
+                        "count": "[parameters('pollMaxIterations')]",
+                        "timeout": "[parameters('pollMaxDuration')]"
+                      },
+                      "actions": {
+                        "Wait_Poll_Interval": {
+                          "type": "Wait",
+                          "inputs": {
+                            "interval": {
+                              "count": "[parameters('pollIntervalSeconds')]",
+                              "unit": "Second"
+                            }
+                          },
+                          "runAfter": {}
+                        },
+                        "Get_Orchestration_Status": {
+                          "type": "Http",
+                          "inputs": {
+                            "method": "GET",
+                            "uri": "@variables('statusUrl')"
+                          },
+                          "runAfter": {
+                            "Wait_Poll_Interval": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Update_Status": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "orchestrationStatus",
+                            "value": "@body('Get_Orchestration_Status')"
+                          },
+                          "runAfter": {
+                            "Get_Orchestration_Status": [
+                              "Succeeded"
+                            ]
+                          }
+                        }
+                      },
+                      "runAfter": {
+                        "Initialize_Status_Body": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Log_Pipeline_Completion": {
+                      "type": "Compose",
+                      "inputs": {
+                        "completedAt": "@{utcNow()}",
+                        "crawlDate": "@{variables('crawlDate')}",
+                        "runtimeStatus": "@{variables('orchestrationStatus')?['runtimeStatus']}",
+                        "instanceId": "@{variables('orchestrationStatus')?['instanceId']}",
+                        "createdTime": "@{variables('orchestrationStatus')?['createdTime']}",
+                        "lastUpdatedTime": "@{variables('orchestrationStatus')?['lastUpdatedTime']}",
+                        "output": "@variables('orchestrationStatus')?['output']"
+                      },
+                      "runAfter": {
+                        "Until_Completed": [
+                          "Succeeded"
+                        ]
+                      },
+                      "metadata": {
+                        "description": "final pipeline result (Durable orchestrator output)"
+                      }
+                    },
+                    "Check_Final_Status": {
+                      "type": "If",
+                      "expression": {
+                        "not": {
+                          "equals": [
+                            "@variables('orchestrationStatus')?['runtimeStatus']",
+                            "Completed"
+                          ]
+                        }
+                      },
+                      "actions": {
+                        "Terminate_With_Failure": {
+                          "type": "Terminate",
+                          "inputs": {
+                            "runStatus": "Failed",
+                            "runError": {
+                              "code": "OrchestrationFailed",
+                              "message": "Durable orchestration ended with non-Completed status: @{variables('orchestrationStatus')?['runtimeStatus']}"
+                            }
+                          },
+                          "runAfter": {}
+                        }
+                      },
+                      "runAfter": {
+                        "Log_Pipeline_Completion": [
+                          "Succeeded"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "tags": {
+                "project": "rag-indexing-lab",
+                "workflow": "crawl-preprocess-workflow"
+              }
+            }
+          ],
+          "outputs": {
+            "crawlWorkflowName": {
+              "type": "string",
+              "value": "[variables('workflowName')]"
+            },
+            "crawlWorkflowId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Logic/workflows', variables('workflowName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'function-crawler-consumption-patch')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "funcCrawlerConsumptionName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-crawler-consumption-patch'), '2025-04-01').outputs.funcAppName.value]"
+    },
+    "orchestratorTriggerUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-crawler-consumption-patch'), '2025-04-01').outputs.orchestratorTriggerUrl.value]"
+    },
+    "workflowName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'logic-app-crawl-patch-method-b'), '2025-04-01').outputs.crawlWorkflowName.value]"
+    },
+    "deploymentContainerName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-crawler-consumption-patch'), '2025-04-01').outputs.deploymentContainerName.value]"
+    }
+  }
+}

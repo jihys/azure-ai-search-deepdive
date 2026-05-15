@@ -44,16 +44,29 @@ resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' = {
   }
 }
 
-// ── RBAC: AI Search → Storage Blob Data Reader ──
+// ── RBAC: AI Search → Storage Blob Data Contributor ──
 // ※ Shared Private Links는 ai-search-spl.bicep에서 초회 배포 시에만 관리
 //   (SPL이 Approved 상태가 된 후 재배포하면 ARM "conflicting update" 오류 발생)
-var storageBlobDataReaderRoleId = '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
-resource searchStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccountId, searchService.id, storageBlobDataReaderRoleId)
+// Contributor (not Reader) — incremental enrichment cache 가 blob 에 쓰기 필요
+var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+resource searchStorageBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccountId, searchService.id, storageBlobDataContributorRoleId)
   scope: resourceGroup()
   properties: {
     principalId: searchService.identity.principalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataReaderRoleId)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// ── RBAC: AI Search → Storage Table Data Contributor (indexer cache 메타) ──
+var storageTableDataContributorRoleId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+resource searchStorageTableRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccountId, searchService.id, storageTableDataContributorRoleId)
+  scope: resourceGroup()
+  properties: {
+    principalId: searchService.identity.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageTableDataContributorRoleId)
     principalType: 'ServicePrincipal'
   }
 }

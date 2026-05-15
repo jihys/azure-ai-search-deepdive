@@ -51,8 +51,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", default="st", help="Source segment under raw/pdf/<source>/")
     parser.add_argument("--container", default=os.getenv("AZURE_STORAGE_CONTAINER_NAME", "raw-documents"))
     parser.add_argument("--prefix", default="", help="Override blob prefix (default: raw/pdf/<source>/)")
-    parser.add_argument("--pipeline", choices=["both", "basic", "verbalized"], default="both",
-                        help="Which pipeline to create (default: both)")
+    parser.add_argument("--pipeline", choices=["both", "basic", "verbalized", "pdf", "pptx", "all"], default="all",
+                        help="Which pipeline(s) to create. 'basic'=='all' (pdf+pptx), 'all' adds verbalized.")
     parser.add_argument("--run-indexer", action="store_true", help="Run indexer(s) immediately after creation")
     parser.add_argument("--dimensions", type=int, default=3072, help="Embedding vector dimensions")
     parser.add_argument("--schedule", default="PT24H",
@@ -114,6 +114,9 @@ def create_index(client: SearchAdminClient, index_name: str, dimensions: int) ->
             {"name": "source_file_name", "type": "Edm.String", "searchable": True, "filterable": True},
             {"name": "source_blob_path", "type": "Edm.String", "filterable": True, "retrievable": True},
             {"name": "content_type", "type": "Edm.String", "filterable": True, "facetable": True},
+            # 분류 필터용 — blob 사용자 메타데이터에서 enrichment
+            {"name": "file_type", "type": "Edm.String", "filterable": True, "facetable": True, "retrievable": True},
+            {"name": "source_category", "type": "Edm.String", "filterable": True, "facetable": True, "retrievable": True},
             {"name": "content", "type": "Edm.String", "searchable": True, "analyzer": "ko.lucene"},
             {
                 "name": "content_vector",
@@ -158,21 +161,41 @@ def create_basic_skillset(
     openai_endpoint: str,
     embedding_deployment: str,
     dimensions: int,
+    skills_function_url: str,
+    skills_function_key: str,
+    file_type: str,                    # 'pdf' 또는 'pptx'
     max_chunk_chars: int,
     overlap_chars: int,
 ) -> None:
-    """Pipeline B (Basic): DI Layout → Native SplitSkill (markdown mode) → Embedding
-    별도 Function App 불필요 — AI Search 내장 스킬만 사용"""
-    print(f"  [skillset] {skillset_name}")
+    """ト 파이프라인 (basic, file-type 별로 분리):
+      - PDF  : DI Layout → Custom markdown_split (헤더+길이) → Embedding
+      - PPTX : DI Layout → Custom pptx_page_split (슬라이드 단위) → Embedding
+    공통: indexProjections → 동일 인덱스. file_type 필드로 분리 가능."""
+    print(f"  [skillset] {skillset_name}  (file_type={file_type})")
+
+    if file_type == "pdf":
+        split_route = "markdown_split"
+        split_desc = "Markdown 헤더/길이 기반 분할 (PDF)"
+        split_inputs = [
+            {"name": "text", "source": "/document/layout_markdown"},
+        ]
+    elif file_type == "pptx":
+        split_route = "pptx_page_split"
+        split_desc = "PPTX <!-- PageBreak --> 기반 슬라이드 분할"
+        split_inputs = [
+            {"name": "text", "source": "/document/layout_markdown"},
+        ]
+    else:
+        raise ValueError(f"Unsupported file_type: {file_type}")
 
     skillset_payload = {
         "name": skillset_name,
-        "description": "Multimodal PDF: DI Layout + Native Markdown Split + Embedding (no verbalization, no custom skill)",
+        "description": f"Multimodal {file_type.upper()}: DI Layout + Custom {split_route} + Embedding",
         "skills": [
             {
                 "@odata.type": "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill",
                 "name": "di-layout-skill",
-                "description": "Extract markdown from PDF using Document Intelligence Layout",
+                "description": f"Extract markdown from {file_type.upper()} using Document Intelligence Layout",
                 "context": "/document",
                 "outputMode": "oneToMany",
                 "inputs": [
@@ -183,25 +206,26 @@ def create_basic_skillset(
                 ],
             },
             {
-                "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
-                "name": "markdown-split-skill",
-                "description": "Native pages 분할 (AI Search 내장)",
+                "@odata.type": "#Microsoft.Skills.Custom.WebApiSkill",
+                "name": f"{file_type}-split-skill",
+                "description": split_desc,
                 "context": "/document",
-                # 'markdown' 모드는 현재 사용 중인 API 버전에서 지원되지 않아 pages로 고정
-                "textSplitMode": "pages",
-                "maximumPageLength": max_chunk_chars,
-                "pageOverlapLength": overlap_chars,
-                "inputs": [
-                    {"name": "text", "source": "/document/layout_markdown"},
-                ],
+                "uri": f"{skills_function_url}/api/{split_route}",
+                "httpMethod": "POST",
+                "timeout": "PT60S",
+                "batchSize": 1,
+                "httpHeaders": {
+                    "x-functions-key": skills_function_key,
+                },
+                "inputs": split_inputs,
                 "outputs": [
-                    {"name": "textItems", "targetName": "markdown_chunks"},
+                    {"name": "chunks", "targetName": "markdown_chunks"},
                 ],
             },
             {
                 "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
                 "name": "embedding-skill",
-                "description": "Generate embedding for each markdown chunk",
+                "description": "Generate embedding for each chunk",
                 "context": "/document/markdown_chunks/*",
                 "resourceUri": openai_endpoint,
                 "deploymentId": embedding_deployment,
@@ -227,7 +251,8 @@ def create_basic_skillset(
                         {"name": "source_file_name", "source": "/document/metadata_storage_name"},
                         {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
                         {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
-                        {"name": "content_type", "source": "='text'"},
+                        {"name": "file_type", "source": "/document/file_type"},
+                        {"name": "source_category", "source": "/document/source_category"},
                     ],
                 }
             ],
@@ -237,7 +262,7 @@ def create_basic_skillset(
 
     delete_if_exists(client, f"/skillsets/{skillset_name}")
     client.request("PUT", f"/skillsets/{skillset_name}", skillset_payload)
-    print(f"    ✓ created (DI Layout → Native SplitSkill[pages] → Embedding)")
+    print(f"    ✓ created (DI Layout → {split_route} → Embedding)")
 
 
 def create_verbalized_skillset(
@@ -306,8 +331,6 @@ def create_verbalized_skillset(
                 },
                 "inputs": [
                     {"name": "text", "source": "/document/verbalized_markdown"},
-                    {"name": "max_chunk_chars", "source": f"='{max_chunk_chars}'"},
-                    {"name": "overlap_chars", "source": f"='{overlap_chars}'"},
                 ],
                 "outputs": [
                     {"name": "chunks", "targetName": "markdown_chunks"},
@@ -342,7 +365,8 @@ def create_verbalized_skillset(
                         {"name": "source_file_name", "source": "/document/metadata_storage_name"},
                         {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
                         {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
-                        {"name": "content_type", "source": "='verbalized'"},
+                        {"name": "file_type", "source": "/document/file_type"},
+                        {"name": "source_category", "source": "/document/source_category"},
                     ],
                 }
             ],
@@ -405,8 +429,20 @@ def create_indexer(
     run_now: bool,
     schedule_interval: str,
     schedule_start_time: str,
+    indexed_extensions: str | None = None,   # 예: ".pdf" 또는 ".pptx"
+    excluded_extensions: str | None = None,
 ) -> None:
     print(f"  [indexer] {indexer_name}")
+
+    config = {
+        "dataToExtract": "contentAndMetadata",
+        "parsingMode": "default",
+        "allowSkillsetToReadFileData": True,
+    }
+    if indexed_extensions:
+        config["indexedFileNameExtensions"] = indexed_extensions
+    if excluded_extensions:
+        config["excludedFileNameExtensions"] = excluded_extensions
 
     indexer_payload = {
         "name": indexer_name,
@@ -415,19 +451,26 @@ def create_indexer(
         "skillsetName": skillset_name,
         "parameters": {
             "batchSize": 5,
-            "maxFailedItems": 10,
-            "maxFailedItemsPerBatch": 5,
-            "configuration": {
-                "dataToExtract": "contentAndMetadata",
-                "parsingMode": "default",
-                "allowSkillsetToReadFileData": True,
-            },
+            "maxFailedItems": 20,
+            "maxFailedItemsPerBatch": 10,
+            "configuration": config,
         },
         "fieldMappings": [
             {"sourceFieldName": "metadata_storage_path", "targetFieldName": "source_blob_path"},
             {"sourceFieldName": "metadata_storage_name", "targetFieldName": "source_file_name"},
         ],
     }
+
+    # Incremental enrichment cache (옵션): SETUP_ENABLE_CACHE=1 일 때만 활성화
+    # 멀티모달 파이프라인은 DI Layout / GPT-비전 호출 비용이 매우 크므로 캐시 효과가 가장 큼
+    if os.environ.get("SETUP_ENABLE_CACHE") == "1":
+        storage_resource_id = os.environ.get("AZURE_STORAGE_RESOURCE_ID", "")
+        if storage_resource_id:
+            indexer_payload["cache"] = {
+                "storageConnectionString": f"ResourceId={storage_resource_id};",
+                "enableReprocessing": True,
+            }
+            print(f"    cache: enabled (Storage MSI 'Storage Blob Data Contributor' 권한 필요)")
 
     # 스케줄 설정 — 신규 데이터 없으면 Indexer가 자동으로 skip
     if schedule_interval.lower() != "none":
@@ -486,21 +529,33 @@ def main() -> None:
         raise ValueError("AZURE_SEARCH_SERVICE_ENDPOINT (or AZURE_SEARCH_ENDPOINT) is required.")
     if not openai_endpoint:
         raise ValueError("AZURE_OPENAI_ENDPOINT is required.")
-    if args.pipeline in ("both", "verbalized") and not skills_function_url:
-        raise ValueError("SKILLS_FUNCTION_URL is required for verbalized pipeline (deployed skills-function URL).")
 
-    prefix = args.prefix or f"raw/pdf/{args.source}/"
+    # 'basic' 은 pdf+pptx 두 파이프라인을 말함
+    pipeline = args.pipeline
+    want_pdf = pipeline in ("all", "both", "basic", "pdf")
+    want_pptx = pipeline in ("all", "both", "basic", "pptx")
+    want_verbalized = pipeline in ("all", "verbalized")
 
-    # ── 리소스 이름 ──
-    basic_index = f"{args.source}-multimodal-basic-index"
-    basic_skillset = f"{args.source}-multimodal-basic-skillset"
-    basic_indexer = f"{args.source}-multimodal-basic-indexer"
+    if (want_pdf or want_pptx or want_verbalized) and not skills_function_url:
+        raise ValueError("SKILLS_FUNCTION_URL is required (deploy skills-function via notebook 01 §5.5).")
+
+    # 데이터소스 prefix는 raw/ (pdf+pptx 서브폴더 모두 포함). args.prefix로 재정의 가능.
+    prefix = args.prefix or "raw/"
+
+    # ── 리소스 이름 (file-type 별로 분리) ──
+    pdf_index = f"{args.source}-multimodal-pdf-index"
+    pdf_skillset = f"{args.source}-multimodal-pdf-skillset"
+    pdf_indexer = f"{args.source}-multimodal-pdf-indexer"
+
+    pptx_index = f"{args.source}-multimodal-pptx-index"
+    pptx_skillset = f"{args.source}-multimodal-pptx-skillset"
+    pptx_indexer = f"{args.source}-multimodal-pptx-indexer"
 
     verbalized_index = f"{args.source}-multimodal-verbalized-index"
     verbalized_skillset = f"{args.source}-multimodal-verbalized-skillset"
     verbalized_indexer = f"{args.source}-multimodal-verbalized-indexer"
 
-    datasource_name = f"{args.source}-raw-pdf-datasource"
+    datasource_name = f"{args.source}-raw-datasource"
 
     # ── 설정 출력 ──
     print("=" * 60)
@@ -509,14 +564,14 @@ def main() -> None:
     print(f"  search      : {search_endpoint}")
     print(f"  container   : {args.container}/{prefix}")
     print(f"  skills func : {skills_function_url}")
-    print(f"  pipeline    : {args.pipeline}")
+    print(f"  pipeline    : {pipeline}  (pdf={want_pdf}, pptx={want_pptx}, verbalized={want_verbalized})")
     print(f"  schedule    : {args.schedule} (start: {args.start_time})")
     print(f"  chunk       : max {args.max_chunk_chars} chars, overlap {args.overlap_chars}")
     print()
 
     client = SearchAdminClient(endpoint=search_endpoint, admin_key=search_admin_key)
 
-    # ── Data Source (공유) ──
+    # ── Data Source (3개 인덱서 공유) ──
     print("[1] Data Source")
     create_datasource(
         client, datasource_name=datasource_name,
@@ -525,61 +580,74 @@ def main() -> None:
     )
     print()
 
-    # ── Pipeline A: Basic (no verbalization, no custom skill) ──
-    if args.pipeline in ("both", "basic"):
-        print("[2A] Pipeline BASIC (DI Layout → Native SplitSkill[markdown] → Embedding)")
-        create_index(client, index_name=basic_index, dimensions=args.dimensions)
+    # ── Pipeline PDF ──
+    if want_pdf:
+        print("[2A] Pipeline PDF (DI Layout → markdown_split[header+length] → Embedding)")
+        create_index(client, index_name=pdf_index, dimensions=args.dimensions)
         create_basic_skillset(
-            client,
-            skillset_name=basic_skillset,
-            index_name=basic_index,
-            openai_endpoint=openai_endpoint,
-            embedding_deployment=embedding_deployment,
-            dimensions=args.dimensions,
-            max_chunk_chars=args.max_chunk_chars,
-            overlap_chars=args.overlap_chars,
-        )
-        create_indexer(
-            client,
-            indexer_name=basic_indexer,
-            datasource_name=datasource_name,
-            index_name=basic_index,
-            skillset_name=basic_skillset,
-            run_now=args.run_indexer,
-            schedule_interval=args.schedule,
-            schedule_start_time=args.start_time,
-        )
-        if args.run_indexer:
-            wait_indexer(client, indexer_name=basic_indexer)
-        print()
-
-    # ── Pipeline B: Verbalized (GPT-5.4) ──
-    if args.pipeline in ("both", "verbalized"):
-        print("[2B] Pipeline VERBALIZED (DI Layout → GPT-5.4 → Markdown Split → Embedding)")
-        create_index(client, index_name=verbalized_index, dimensions=args.dimensions)
-        create_verbalized_skillset(
-            client,
-            skillset_name=verbalized_skillset,
-            index_name=verbalized_index,
-            openai_endpoint=openai_endpoint,
-            embedding_deployment=embedding_deployment,
+            client, skillset_name=pdf_skillset, index_name=pdf_index,
+            openai_endpoint=openai_endpoint, embedding_deployment=embedding_deployment,
             dimensions=args.dimensions,
             skills_function_url=skills_function_url,
             skills_function_key=skills_function_key,
-            max_chunk_chars=args.max_chunk_chars,
-            overlap_chars=args.overlap_chars,
+            file_type="pdf",
+            max_chunk_chars=args.max_chunk_chars, overlap_chars=args.overlap_chars,
         )
-        # verbalized는 basic보다 30분 늦게 시작 (리소스 경합 방지)
-        verb_start = args.start_time.replace("T07:", "T07:30:") if "T07:" in args.start_time else args.start_time
         create_indexer(
+            client, indexer_name=pdf_indexer, datasource_name=datasource_name,
+            index_name=pdf_index, skillset_name=pdf_skillset,
+            run_now=args.run_indexer, schedule_interval=args.schedule,
+            schedule_start_time=args.start_time,
+            indexed_extensions=".pdf",
+        )
+        if args.run_indexer:
+            wait_indexer(client, indexer_name=pdf_indexer)
+        print()
+
+    # ── Pipeline PPTX ──
+    if want_pptx:
+        print("[2B] Pipeline PPTX (DI Layout → pptx_page_split[slide] → Embedding)")
+        create_index(client, index_name=pptx_index, dimensions=args.dimensions)
+        create_basic_skillset(
+            client, skillset_name=pptx_skillset, index_name=pptx_index,
+            openai_endpoint=openai_endpoint, embedding_deployment=embedding_deployment,
+            dimensions=args.dimensions,
+            skills_function_url=skills_function_url,
+            skills_function_key=skills_function_key,
+            file_type="pptx",
+            max_chunk_chars=args.max_chunk_chars, overlap_chars=args.overlap_chars,
+        )
+        create_indexer(
+            client, indexer_name=pptx_indexer, datasource_name=datasource_name,
+            index_name=pptx_index, skillset_name=pptx_skillset,
+            run_now=args.run_indexer, schedule_interval=args.schedule,
+            schedule_start_time=args.start_time,
+            indexed_extensions=".pptx",
+        )
+        if args.run_indexer:
+            wait_indexer(client, indexer_name=pptx_indexer)
+        print()
+
+    # ── Pipeline Verbalized (PDF만) ──
+    if want_verbalized:
+        print("[2C] Pipeline VERBALIZED (DI Layout → GPT-5.4 → Markdown Split → Embedding)")
+        create_index(client, index_name=verbalized_index, dimensions=args.dimensions)
+        create_verbalized_skillset(
             client,
-            indexer_name=verbalized_indexer,
-            datasource_name=datasource_name,
-            index_name=verbalized_index,
-            skillset_name=verbalized_skillset,
-            run_now=args.run_indexer,
-            schedule_interval=args.schedule,
+            skillset_name=verbalized_skillset, index_name=verbalized_index,
+            openai_endpoint=openai_endpoint, embedding_deployment=embedding_deployment,
+            dimensions=args.dimensions,
+            skills_function_url=skills_function_url,
+            skills_function_key=skills_function_key,
+            max_chunk_chars=args.max_chunk_chars, overlap_chars=args.overlap_chars,
+        )
+        verb_start = args.start_time.replace("T07:00:", "T07:30:") if "T07:00:" in args.start_time else args.start_time
+        create_indexer(
+            client, indexer_name=verbalized_indexer, datasource_name=datasource_name,
+            index_name=verbalized_index, skillset_name=verbalized_skillset,
+            run_now=args.run_indexer, schedule_interval=args.schedule,
             schedule_start_time=verb_start,
+            indexed_extensions=".pdf",   # verbalized는 PDF 대상
         )
         if args.run_indexer:
             wait_indexer(client, indexer_name=verbalized_indexer)
@@ -590,17 +658,14 @@ def main() -> None:
     print("✓ 파이프라인 설정 완료!")
     if args.schedule.lower() != "none":
         print(f"  Indexer가 매 {args.schedule} 간격으로 자동 실행됩니다.")
-        print(f"  신규/변경 데이터가 없으면 자동으로 skip합니다.")
     print()
-    print("  성능 비교용 인덱스:")
-    if args.pipeline in ("both", "basic"):
-        print(f"    [A] {basic_index} — 텍스트만 (verbalization 없음)")
-    if args.pipeline in ("both", "verbalized"):
-        print(f"    [B] {verbalized_index} — GPT-5.4 이미지 설명 포함")
-    print()
-    print("  수동 실행:")
-    print(f"    az search indexer run --name {basic_indexer} --service-name <search> --resource-group <rg>")
-    print(f"    az search indexer run --name {verbalized_indexer} --service-name <search> --resource-group <rg>")
+    print("  인덱스:")
+    if want_pdf:
+        print(f"    [PDF]        {pdf_index}        — markdown header+length split")
+    if want_pptx:
+        print(f"    [PPTX]       {pptx_index}       — slide-level page split")
+    if want_verbalized:
+        print(f"    [Verbalized] {verbalized_index} — GPT-5.4 image description")
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ resource openaiAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
     publicNetworkAccess: 'Disabled'
     networkAcls: {
       defaultAction: 'Deny'
+      bypass: 'AzureServices'  // Search → AOAI trusted call 허용 (Knowledge Agent planner)
     }
   }
   tags: {

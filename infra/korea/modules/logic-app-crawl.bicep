@@ -1,14 +1,21 @@
 // ============================================
-// Logic App (Consumption) - 크롤 + 전처리 통합 스케줄러
-// 매일 21:00 UTC (= 06:00 KST)
-//   1. Call_Crawl_Function_All_Sources → /api/crawl  (4-source 병렬 크롤)
-//   2. Check_Crawl_Success → if status=success
-//       Parallel_Preprocess_Sources → /api/preprocess × {prec, detc, expc, admrul}
-//   3. Log_Pipeline_Completion
+// Logic App (Consumption) — Durable Functions Orchestrator 호출 + 폴링
 //
-// Self-reference SetVariable 회피: pipelineResults 누적 변수 제거,
-// 모든 결과는 마지막 Compose 액션에서 한 번에 모음.
-// → Sweden/Korea 동일 정의로 재사용 가능.
+// 흐름:
+//   1. Daily 06:00 KST 스케줄 (또는 수동 트리거)
+//   2. Start_Orchestration (HTTP POST /api/orchestrators/crawl_preprocess)
+//        → 202 Accepted + statusQueryGetUri (즉시 반환, 타임아웃 무관)
+//   3. Until_Completed (Until loop) — statusQueryGetUri 폴링 (30s 간격, 최대 4시간)
+//        → runtimeStatus in [Completed, Failed, Terminated, Canceled] 시 종료
+//   4. Log_Pipeline_Completion — 최종 output 저장
+//
+// 장점 (Method B):
+//   - HTTP 11분 타임아웃 회피 (Durable 비동기 패턴)
+//   - 크롤 → 전처리 순서 보장 (orchestrator 내부에서 처리)
+//   - 4 source × N 배치 fan-out (Consumption 자동 스케일)
+//   - 중복 제거: existing seqs + listing dedup + preprocess idempotency
+//
+// Sweden/Korea 동일 정의 — 두 리전 모두 적용 가능.
 // ============================================
 
 @description('배포 리전')
@@ -17,14 +24,23 @@ param location string
 @description('리소스 이름 접미사')
 param suffix string
 
-@description('호출할 크롤 Function HTTP 트리거 URL (/api/crawl)')
-param crawlFunctionUrl string
+@description('Durable Functions HTTP starter URL (예: https://func-app/api/orchestrators/crawl_preprocess)')
+param orchestratorUrl string
 
-@description('호출할 Preprocess Function HTTP 트리거 URL (/api/preprocess)')
-param preprocessFunctionUrl string
-
-@description('수집할 법령 건수 (0 = 무제한)')
+@description('수집할 법령 페이지 수 (0 = 무제한)')
 param crawlerLimit int = 0
+
+@description('상세 페이지 병렬 워커 수 (단일 Activity 내) — Consumption 자동 스케일과 결합되어 동시성 ↑')
+param detailWorkers int = 20
+
+@description('폴링 간격 (초)')
+param pollIntervalSeconds int = 30
+
+@description('최대 폴링 대기 시간 (ISO 8601 duration)')
+param pollMaxDuration string = 'PT4H'
+
+@description('최대 폴링 횟수 (Until loop 안전 상한)')
+param pollMaxIterations int = 480
 
 var workflowName = 'logic-crawl-ragi-${take(suffix, 8)}'
 
@@ -53,7 +69,7 @@ resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
             timeZone: 'UTC'
           }
           metadata: {
-            description: '06:00 KST - crawl + preprocess pipeline'
+            description: '06:00 KST - Durable orchestrator (crawl + preprocess)'
           }
         }
       }
@@ -71,148 +87,111 @@ resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
           }
           runAfter: {}
         }
-        Call_Crawl_Function_All_Sources: {
+        Start_Orchestration: {
           type: 'Http'
           inputs: {
             method: 'POST'
-            uri: crawlFunctionUrl
+            uri: orchestratorUrl
             headers: {
               'Content-Type': 'application/json'
             }
             body: {
               source: 'all'
               max_pages: crawlerLimit
-              detail_workers: 5
-              triggered_by: 'logic-app-crawl-preprocess'
+              detail_workers: detailWorkers
+              triggered_by: 'logic-app-durable'
+              crawl_date: '@{variables(\'crawlDate\')}'
+              skip_preprocess: false
             }
             retryPolicy: {
               type: 'fixed'
               count: 3
-              interval: 'PT1M'
+              interval: 'PT30S'
             }
           }
+          // Logic App 은 202 응답을 자동 폴링하므로, Durable starter 가 반환하는
+          // {statusQueryGetUri,...} 메타를 바로 받기 위해 async 패턴 비활성화
+          operationOptions: 'DisableAsyncPattern'
           runAfter: {
             Initialize_Today_Date: ['Succeeded']
           }
-          limit: {
-            timeout: 'PT2H'
-          }
           metadata: {
-            description: 'crawl Function - all 4 sources (prec/detc/expc/admrul)'
+            description: 'Durable Functions HTTP starter — returns 202 + statusQueryGetUri (async polling disabled)'
           }
         }
-        Check_Crawl_Success: {
-          type: 'If'
-          expression: {
-            and: [
+        Initialize_Status_Url: {
+          type: 'InitializeVariable'
+          inputs: {
+            variables: [
               {
-                equals: [
-                  '@body(\'Call_Crawl_Function_All_Sources\')?[\'status\']'
-                  'success'
-                ]
+                name: 'statusUrl'
+                type: 'string'
+                value: '@{body(\'Start_Orchestration\')?[\'statusQueryGetUri\']}'
               }
             ]
           }
+          runAfter: {
+            Start_Orchestration: ['Succeeded']
+          }
+        }
+        Initialize_Status_Body: {
+          type: 'InitializeVariable'
+          inputs: {
+            variables: [
+              {
+                name: 'orchestrationStatus'
+                type: 'object'
+                value: {
+                  runtimeStatus: 'Pending'
+                }
+              }
+            ]
+          }
+          runAfter: {
+            Initialize_Status_Url: ['Succeeded']
+          }
+        }
+        Until_Completed: {
+          type: 'Until'
+          expression: '@contains(createArray(\'Completed\',\'Failed\',\'Terminated\',\'Canceled\'), variables(\'orchestrationStatus\')?[\'runtimeStatus\'])'
+          limit: {
+            count: pollMaxIterations
+            timeout: pollMaxDuration
+          }
           actions: {
-            Parallel_Preprocess_Sources: {
-              type: 'Scope'
-              actions: {
-                Preprocess_Prec: {
-                  type: 'Http'
-                  inputs: {
-                    method: 'POST'
-                    uri: preprocessFunctionUrl
-                    headers: {
-                      'Content-Type': 'application/json'
-                    }
-                    body: {
-                      source: 'prec'
-                      crawl_date: '@{variables(\'crawlDate\')}'
-                      triggered_by: 'logic-app-crawl-preprocess'
-                    }
-                  }
-                  limit: {
-                    timeout: 'PT1H'
-                  }
-                  metadata: {
-                    description: 'prec JSON -> JSONL'
-                  }
-                }
-                Preprocess_Detc: {
-                  type: 'Http'
-                  inputs: {
-                    method: 'POST'
-                    uri: preprocessFunctionUrl
-                    headers: {
-                      'Content-Type': 'application/json'
-                    }
-                    body: {
-                      source: 'detc'
-                      crawl_date: '@{variables(\'crawlDate\')}'
-                      triggered_by: 'logic-app-crawl-preprocess'
-                    }
-                  }
-                  limit: {
-                    timeout: 'PT1H'
-                  }
-                  metadata: {
-                    description: 'detc JSON -> JSONL'
-                  }
-                }
-                Preprocess_Expc: {
-                  type: 'Http'
-                  inputs: {
-                    method: 'POST'
-                    uri: preprocessFunctionUrl
-                    headers: {
-                      'Content-Type': 'application/json'
-                    }
-                    body: {
-                      source: 'expc'
-                      crawl_date: '@{variables(\'crawlDate\')}'
-                      triggered_by: 'logic-app-crawl-preprocess'
-                    }
-                  }
-                  limit: {
-                    timeout: 'PT1H'
-                  }
-                  metadata: {
-                    description: 'expc JSON -> JSONL'
-                  }
-                }
-                Preprocess_Admrul: {
-                  type: 'Http'
-                  inputs: {
-                    method: 'POST'
-                    uri: preprocessFunctionUrl
-                    headers: {
-                      'Content-Type': 'application/json'
-                    }
-                    body: {
-                      source: 'admrul'
-                      crawl_date: '@{variables(\'crawlDate\')}'
-                      triggered_by: 'logic-app-crawl-preprocess'
-                    }
-                  }
-                  limit: {
-                    timeout: 'PT1H'
-                  }
-                  metadata: {
-                    description: 'admrul JSON -> JSONL'
-                  }
+            Wait_Poll_Interval: {
+              type: 'Wait'
+              inputs: {
+                interval: {
+                  count: pollIntervalSeconds
+                  unit: 'Second'
                 }
               }
               runAfter: {}
-              metadata: {
-                description: '4-source parallel preprocess (Integration: JSON -> JSONL)'
+            }
+            Get_Orchestration_Status: {
+              type: 'Http'
+              inputs: {
+                method: 'GET'
+                uri: '@variables(\'statusUrl\')'
+              }
+              runAfter: {
+                Wait_Poll_Interval: ['Succeeded']
+              }
+            }
+            Update_Status: {
+              type: 'SetVariable'
+              inputs: {
+                name: 'orchestrationStatus'
+                value: '@body(\'Get_Orchestration_Status\')'
+              }
+              runAfter: {
+                Get_Orchestration_Status: ['Succeeded']
               }
             }
           }
-          else: {
-            actions: {}
-          }
           runAfter: {
-            Call_Crawl_Function_All_Sources: ['Succeeded']
+            Initialize_Status_Body: ['Succeeded']
           }
         }
         Log_Pipeline_Completion: {
@@ -220,20 +199,44 @@ resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
           inputs: {
             completedAt: '@{utcNow()}'
             crawlDate: '@{variables(\'crawlDate\')}'
-            crawlStatus: '@{body(\'Call_Crawl_Function_All_Sources\')?[\'status\']}'
-            crawlResult: '@body(\'Call_Crawl_Function_All_Sources\')'
-            preprocessResults: {
-              prec: '@body(\'Preprocess_Prec\')'
-              detc: '@body(\'Preprocess_Detc\')'
-              expc: '@body(\'Preprocess_Expc\')'
-              admrul: '@body(\'Preprocess_Admrul\')'
+            runtimeStatus: '@{variables(\'orchestrationStatus\')?[\'runtimeStatus\']}'
+            instanceId: '@{variables(\'orchestrationStatus\')?[\'instanceId\']}'
+            createdTime: '@{variables(\'orchestrationStatus\')?[\'createdTime\']}'
+            lastUpdatedTime: '@{variables(\'orchestrationStatus\')?[\'lastUpdatedTime\']}'
+            output: '@variables(\'orchestrationStatus\')?[\'output\']'
+          }
+          runAfter: {
+            Until_Completed: ['Succeeded']
+          }
+          metadata: {
+            description: 'final pipeline result (Durable orchestrator output)'
+          }
+        }
+        Check_Final_Status: {
+          type: 'If'
+          expression: {
+            not: {
+              equals: [
+                '@variables(\'orchestrationStatus\')?[\'runtimeStatus\']'
+                'Completed'
+              ]
+            }
+          }
+          actions: {
+            Terminate_With_Failure: {
+              type: 'Terminate'
+              inputs: {
+                runStatus: 'Failed'
+                runError: {
+                  code: 'OrchestrationFailed'
+                  message: 'Durable orchestration ended with non-Completed status: @{variables(\'orchestrationStatus\')?[\'runtimeStatus\']}'
+                }
+              }
+              runAfter: {}
             }
           }
           runAfter: {
-            Check_Crawl_Success: ['Succeeded', 'Failed', 'Skipped']
-          }
-          metadata: {
-            description: 'final pipeline result log (crawl + 4-source preprocess)'
+            Log_Pipeline_Completion: ['Succeeded']
           }
         }
       }

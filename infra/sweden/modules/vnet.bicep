@@ -14,6 +14,7 @@ var nsgName = 'nsg-pep-ragi-${take(suffix, 8)}'
 var jumpSubnetName = 'snet-jump'
 var pepSubnetName = 'snet-pep'
 var funcSubnetName = 'snet-func'
+var funcFc1SubnetName = 'snet-func-fc1'
 
 // ── NSG (Private Endpoint 서브넷용) ──
 resource nsg 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
@@ -63,6 +64,28 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
               properties: {
                 serviceName: 'Microsoft.Web/serverFarms'
               }
+            }
+          ]
+        }
+      }
+      {
+        // Flex Consumption (FC1) Function App 전용 서브넷
+        // FC1 은 Container Apps 기반 → Microsoft.App/environments 위임 필요
+        // 동일 subnet 을 EP1 plan 과 공유 불가 (ServiceAssociationLink 충돌)
+        name: funcFc1SubnetName
+        properties: {
+          addressPrefix: '10.0.4.0/24'
+          delegations: [
+            {
+              name: 'delegation-func-fc1'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
+          serviceEndpoints: [
+            {
+              service: 'Microsoft.Storage'
             }
           ]
         }
@@ -191,11 +214,31 @@ resource vaultDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@202
   }
 }
 
+// ── Private DNS Zone: Foundry Agent Service (services.ai.azure.com) ──
+// AIServices 계정의 services.ai.azure.com 서브도메인 사설 해석용
+// → AgentsClient(endpoint='https://<account>.services.ai.azure.com/...') VNet 내부에서 접근
+resource servicesAiDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.services.ai.azure.com'
+  location: 'global'
+  tags: { project: 'rag-indexing-lab' }
+}
+
+resource servicesAiDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: servicesAiDnsZone
+  name: 'link-services-ai-${take(suffix, 8)}'
+  location: 'global'
+  properties: {
+    virtualNetwork: { id: vnet.id }
+    registrationEnabled: false
+  }
+}
+
 // ── Outputs ──
 output vnetId string = vnet.id
 output vnetName string = vnet.name
 output pepSubnetId string = '${vnet.id}/subnets/${pepSubnetName}'
 output funcSubnetId string = '${vnet.id}/subnets/${funcSubnetName}'
+output funcFc1SubnetId string = '${vnet.id}/subnets/${funcFc1SubnetName}'
 output jumpSubnetId string = '${vnet.id}/subnets/${jumpSubnetName}'
 output blobDnsZoneId string = blobDnsZone.id
 output searchDnsZoneId string = searchDnsZone.id
@@ -204,3 +247,4 @@ output openaiDnsZoneId string = openaiDnsZone.id
 output azuremlDnsZoneId string = azuremlDnsZone.id
 output notebooksDnsZoneId string = notebooksDnsZone.id
 output vaultDnsZoneId string = vaultDnsZone.id
+output servicesAiDnsZoneId string = servicesAiDnsZone.id

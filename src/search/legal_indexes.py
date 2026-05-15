@@ -374,7 +374,7 @@ class LegalIndexManager:
         client = SearchClient(endpoint=self.endpoint, index_name=index_name, credential=self.credential)
         vector_queries = None
         if embedding:
-            vector_queries = [VectorizedQuery(vector=embedding, k=top, fields="summaryEmbedding")]
+            vector_queries = [VectorizedQuery(vector=embedding, k_nearest_neighbors=top, fields="summaryEmbedding")]
 
         search_kwargs: dict = dict(
             search_text=query,
@@ -386,7 +386,7 @@ class LegalIndexManager:
         if use_semantic and index_name in self.SEMANTIC_CONFIG_NAMES:
             search_kwargs["query_type"] = QueryType.SEMANTIC
             search_kwargs["semantic_configuration_name"] = self.SEMANTIC_CONFIG_NAMES[index_name]
-            search_kwargs["query_caption"] = QueryCaptionType.EXTRACTIVE
+            search_kwargs["query_caption"] = "extractive"
 
         results = client.search(**search_kwargs)
         docs = []
