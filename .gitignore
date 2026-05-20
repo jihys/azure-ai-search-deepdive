@@ -29,6 +29,13 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/*.zip
+
+# Logs
+logs/
+
+# Deploy artifacts
+*.deploy.zip
 
 # Azure
 *.tfstate

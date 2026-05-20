@@ -319,7 +319,10 @@ class LegalIndexManager:
         if admin_key:
             self.credential = AzureKeyCredential(admin_key)
         else:
-            self.credential = DefaultAzureCredential()
+            self.credential = DefaultAzureCredential(
+                exclude_managed_identity_credential=True,
+                exclude_workload_identity_credential=True,
+            )
         self.index_client = SearchIndexClient(endpoint=endpoint, credential=self.credential)
 
     def create_all_indexes(self, dimensions: int = 3072) -> None:

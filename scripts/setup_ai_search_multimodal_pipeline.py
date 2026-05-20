@@ -67,7 +67,15 @@ class SearchAdminClient:
     def __init__(self, endpoint: str, admin_key: str):
         self.endpoint = endpoint.rstrip("/")
         self.admin_key = admin_key
-        self.credential = DefaultAzureCredential() if not admin_key else None
+        # VM Managed Identity는 해당 사용자의 Search RBAC를 공유하지 않으므로 제외
+        self.credential = (
+            DefaultAzureCredential(
+                exclude_managed_identity_credential=True,
+                exclude_workload_identity_credential=True,
+            )
+            if not admin_key
+            else None
+        )
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -79,7 +87,8 @@ class SearchAdminClient:
         return headers
 
     def request(self, method: str, path: str, payload: dict | None = None) -> dict:
-        url = f"{self.endpoint}{path}?api-version={API_VERSION}"
+        sep = "&" if "?" in path else "?"
+        url = f"{self.endpoint}{path}{sep}api-version={API_VERSION}"
         resp = requests.request(method, url, headers=self._headers(), json=payload, timeout=120)
         if resp.status_code not in (200, 201, 202, 204):
             print(f"[ERROR] {method} {path} -> {resp.status_code}")
@@ -166,6 +175,7 @@ def create_basic_skillset(
     file_type: str,                    # 'pdf' 또는 'pptx'
     max_chunk_chars: int,
     overlap_chars: int,
+    ai_services_subdomain: str = "",
 ) -> None:
     """ト 파이프라인 (basic, file-type 별로 분리):
       - PDF  : DI Layout → Custom markdown_split (헤더+길이) → Embedding
@@ -213,7 +223,10 @@ def create_basic_skillset(
                 "uri": f"{skills_function_url}/api/{split_route}",
                 "httpMethod": "POST",
                 "timeout": "PT60S",
-                "batchSize": 1,
+                # 병렬화: 여러 record 를 동시에 함수로 전송.
+                # split 은 순수 파싱이라 가벼우므로 batchSize 크게 잡고 병렬도 높게.
+                "batchSize": 10,
+                "degreeOfParallelism": 10,
                 "httpHeaders": {
                     "x-functions-key": skills_function_key,
                 },
@@ -260,9 +273,19 @@ def create_basic_skillset(
         },
     }
 
-    delete_if_exists(client, f"/skillsets/{skillset_name}")
-    client.request("PUT", f"/skillsets/{skillset_name}", skillset_payload)
-    print(f"    ✓ created (DI Layout → {split_route} → Embedding)")
+    # AI Services 첨부 (free quota 20 docs 제한 해제). identity-based (Search MI).
+    if ai_services_subdomain:
+        skillset_payload["cognitiveServices"] = {
+            "@odata.type": "#Microsoft.Azure.Search.AIServicesByIdentity",
+            "subdomainUrl": ai_services_subdomain.rstrip("/") + "/",
+            "identity": None,
+        }
+
+    # 캐시 보존: skillset 을 다시 PUT 해도 cache HIT 이 유지되도록
+    # ?skipIndexerResetRequirementForCache=true 쿼리 파라미터 사용.
+    # delete + PUT 은 etag 가 새로 발급되어 cache 가 무효화될 수 있으므로 upsert(PUT) 로만.
+    client.request("PUT", f"/skillsets/{skillset_name}?skipIndexerResetRequirementForCache=true", skillset_payload)
+    print(f"    ✓ upserted (DI Layout → {split_route} → Embedding)")
 
 
 def create_verbalized_skillset(
@@ -276,6 +299,7 @@ def create_verbalized_skillset(
     skills_function_key: str,
     max_chunk_chars: int,
     overlap_chars: int,
+    ai_services_subdomain: str = "",
 ) -> None:
     """Pipeline B: DI Layout → GPT-5.4 Verbalization (Custom) → Markdown Header Split (Custom) → Embedding"""
     print(f"  [skillset] {skillset_name}")
@@ -304,8 +328,11 @@ def create_verbalized_skillset(
                 "context": "/document",
                 "uri": f"{skills_function_url}/api/verbalize",
                 "httpMethod": "POST",
-                "timeout": "PT120S",
+                "timeout": "PT230S",
+                # 병렬화: GPT 호출이 무거움(파일당 수분) → batchSize=1 유지하되
+                # 서로 다른 record 를 여러 HTTP 호출로 동시 처리.
                 "batchSize": 1,
+                "degreeOfParallelism": 10,
                 "httpHeaders": {
                     "x-functions-key": skills_function_key,
                 },
@@ -325,7 +352,8 @@ def create_verbalized_skillset(
                 "uri": f"{skills_function_url}/api/markdown_split",
                 "httpMethod": "POST",
                 "timeout": "PT60S",
-                "batchSize": 1,
+                "batchSize": 10,
+                "degreeOfParallelism": 10,
                 "httpHeaders": {
                     "x-functions-key": skills_function_key,
                 },
@@ -374,9 +402,18 @@ def create_verbalized_skillset(
         },
     }
 
-    delete_if_exists(client, f"/skillsets/{skillset_name}")
-    client.request("PUT", f"/skillsets/{skillset_name}", skillset_payload)
-    print(f"    ✓ created (DI Layout → GPT-5.4 Verbalize → Markdown Split → Embedding)")
+    # AI Services 첨부 (free quota 20 docs 제한 해제). identity-based (Search MI).
+    if ai_services_subdomain:
+        skillset_payload["cognitiveServices"] = {
+            "@odata.type": "#Microsoft.Azure.Search.AIServicesByIdentity",
+            "subdomainUrl": ai_services_subdomain.rstrip("/") + "/",
+            "identity": None,
+        }
+
+    # 캐시 보존: skillset 을 다시 PUT 해도 cache HIT 이 유지되도록
+    # ?skipIndexerResetRequirementForCache=true 쿼리 파라미터 사용.
+    client.request("PUT", f"/skillsets/{skillset_name}?skipIndexerResetRequirementForCache=true", skillset_payload)
+    print(f"    ✓ upserted (DI Layout → GPT-5.4 Verbalize → Markdown Split → Embedding)")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -450,7 +487,9 @@ def create_indexer(
         "targetIndexName": index_name,
         "skillsetName": skillset_name,
         "parameters": {
-            "batchSize": 5,
+            # 인덱서가 한 번에 읽어 skillset 에 흠려주는 문서 수.
+            # 멀티모달(GPT 호출 포함) 경우 batch 가 클수록 스킬 병렬성 증가.
+            "batchSize": 10,
             "maxFailedItems": 20,
             "maxFailedItemsPerBatch": 10,
             "configuration": config,
@@ -479,11 +518,11 @@ def create_indexer(
             "startTime": schedule_start_time,
         }
 
-    delete_if_exists(client, f"/indexers/{indexer_name}")
+    # delete + PUT 은 cache state 를 잃을 수 있으므로 upsert(PUT) 로만.
     client.request("PUT", f"/indexers/{indexer_name}", indexer_payload)
 
     schedule_msg = f"every {schedule_interval}" if schedule_interval.lower() != "none" else "no schedule"
-    print(f"    ✓ created ({schedule_msg})")
+    print(f"    ✓ upserted ({schedule_msg})")
 
     if run_now:
         client.request("POST", f"/indexers/{indexer_name}/run", {})
@@ -524,6 +563,7 @@ def main() -> None:
     storage_resource_id = os.getenv("AZURE_STORAGE_RESOURCE_ID", "")
     skills_function_url = os.getenv("SKILLS_FUNCTION_URL", "")
     skills_function_key = os.getenv("SKILLS_FUNCTION_KEY", "")
+    ai_services_subdomain = os.getenv("AZURE_AI_SERVICES_ENDPOINT", "")
 
     if not search_endpoint:
         raise ValueError("AZURE_SEARCH_SERVICE_ENDPOINT (or AZURE_SEARCH_ENDPOINT) is required.")
@@ -571,6 +611,13 @@ def main() -> None:
 
     client = SearchAdminClient(endpoint=search_endpoint, admin_key=search_admin_key)
 
+    # ── 사전 정리: datasource 를 참조하는 기존 인덱서 먼저 삭제 ──
+    #    (datasource 재생성 시 의존 인덱서의 change-tracking state 충돌 방지)
+    print("[0] Cleanup dependent indexers (so datasource can be recreated)")
+    for _idxr in (pdf_indexer, pptx_indexer, verbalized_indexer):
+        delete_if_exists(client, f"/indexers/{_idxr}")
+    print()
+
     # ── Data Source (3개 인덱서 공유) ──
     print("[1] Data Source")
     create_datasource(
@@ -592,6 +639,7 @@ def main() -> None:
             skills_function_key=skills_function_key,
             file_type="pdf",
             max_chunk_chars=args.max_chunk_chars, overlap_chars=args.overlap_chars,
+            ai_services_subdomain=ai_services_subdomain,
         )
         create_indexer(
             client, indexer_name=pdf_indexer, datasource_name=datasource_name,
@@ -616,6 +664,7 @@ def main() -> None:
             skills_function_key=skills_function_key,
             file_type="pptx",
             max_chunk_chars=args.max_chunk_chars, overlap_chars=args.overlap_chars,
+            ai_services_subdomain=ai_services_subdomain,
         )
         create_indexer(
             client, indexer_name=pptx_indexer, datasource_name=datasource_name,
@@ -640,6 +689,7 @@ def main() -> None:
             skills_function_url=skills_function_url,
             skills_function_key=skills_function_key,
             max_chunk_chars=args.max_chunk_chars, overlap_chars=args.overlap_chars,
+            ai_services_subdomain=ai_services_subdomain,
         )
         verb_start = args.start_time.replace("T07:00:", "T07:30:") if "T07:00:" in args.start_time else args.start_time
         create_indexer(

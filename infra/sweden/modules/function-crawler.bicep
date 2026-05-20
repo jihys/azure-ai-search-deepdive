@@ -34,6 +34,9 @@ param blobContainerName string = 'raw-documents'
 @description('크롤러가 수집할 법령 건수')
 param crawlerLimit int = 10
 
+@description('Preprocess Function App 이름 (PREPROCESS_FUNCTION_URI 자동 구성용). 비우면 직접 설정 필요.')
+param preprocessFunctionAppName string = ''
+
 var planName = 'asp-crawl-ragi-${take(suffix, 8)}'
 var funcAppName = 'func-crawl-ragi-${take(suffix, 8)}'
 
@@ -86,6 +89,13 @@ resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_STORAGE_ACCOUNT_NAME', value: storageAccountName }
         { name: 'AZURE_BLOB_CONTAINER_NAME', value: blobContainerName }
         { name: 'CRAWLER_LIMIT', value: string(crawlerLimit) }
+        { name: 'PREPROCESS_TIMEOUT_SECONDS', value: '3600' }
+        {
+          name: 'PREPROCESS_FUNCTION_URI'
+          value: empty(preprocessFunctionAppName)
+            ? ''
+            : 'https://${preprocessFunctionAppName}.azurewebsites.net/api/preprocess'
+        }
       ]
       cors: {
         allowedOrigins: ['https://portal.azure.com']

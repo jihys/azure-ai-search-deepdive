@@ -1,0 +1,7 @@
+# Azure AI Search Deepdive requirements
+azure-identity
+requests
+# For notebook/infra automation
+azure-cli
+# For troubleshooting az cli storage error
+azure-mgmt-storage

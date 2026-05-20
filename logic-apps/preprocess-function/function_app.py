@@ -6,7 +6,9 @@ Logic Apps `crawl-preprocess-workflow` 가 crawl 성공 후 호출합니다.
 HTTP 트리거 (POST /api/preprocess):
   Body (JSON):
     source       : "prec" | "detc" | "expc" | "admrul" | "all"  (default "all")
-    crawl_date   : YYYY-MM-DD (default 오늘 UTC)
+    crawl_date   : YYYY-MM-DD  → 해당 날짜 한 건만 처리 (Logic App 일일 스케줄 용도)
+                 : "all"        → raw-documents 아래 존재하는 모든 날짜를 처음부터 전부 재구성 (백필)
+                 : 미지정       → 환경변수 PREPROCESS_DEFAULT_DATE 사용 (없으면 "all")
     workers      : 병렬 다운로드 워커 수 (default 16)
     triggered_by : 호출 출처 표기
 
@@ -103,6 +105,19 @@ def _clean_document(doc: dict, source: str) -> dict:
     return out
 
 
+def _list_dates_for_source(svc: BlobServiceClient, source: str) -> list[str]:
+    """raw-documents/{source}/ 아래 존재하는 모든 날짜 디렉터리(YYYY-MM-DD) 목록."""
+    raw = svc.get_container_client(RAW_CONTAINER)
+    prefix = f"{source}/"
+    dates = set()
+    for b in raw.list_blobs(name_starts_with=prefix):
+        # name = '{source}/{date}/...'
+        parts = b.name.split("/", 2)
+        if len(parts) >= 3 and len(parts[1]) == 10 and parts[1][4] == "-" and parts[1][7] == "-":
+            dates.add(parts[1])
+    return sorted(dates)
+
+
 def _process_source(svc: BlobServiceClient, source: str, date: str, workers: int) -> dict:
     raw = svc.get_container_client(RAW_CONTAINER)
     proc = svc.get_container_client(PROCESSED_CONTAINER)
@@ -180,7 +195,12 @@ def preprocess_trigger(req: func.HttpRequest) -> func.HttpResponse:
         body = {}
 
     source = req.params.get("source") or body.get("source", "all")
-    crawl_date = req.params.get("crawl_date") or body.get("crawl_date") or start.strftime("%Y-%m-%d")
+    # crawl_date:
+    #   - YYYY-MM-DD  → 해당 날짜 한 건만 처리 (Logic App daily schedule)
+    #   - "all"        → raw-documents 에 존재하는 모든 날짜 처리 (백필)
+    #   - 미지정       → 환경변수 PREPROCESS_DEFAULT_DATE (없으면 "all")
+    default_date = os.environ.get("PREPROCESS_DEFAULT_DATE", "all")
+    crawl_date = req.params.get("crawl_date") or body.get("crawl_date") or default_date
     triggered_by = req.params.get("triggered_by") or body.get("triggered_by", "manual")
     try:
         workers = int(req.params.get("workers") or body.get("workers", DEFAULT_WORKERS))
@@ -210,16 +230,49 @@ def preprocess_trigger(req: func.HttpRequest) -> func.HttpResponse:
     errors_total = 0
 
     for src in targets:
-        try:
-            r = _process_source(svc, src, crawl_date, workers)
-            summary[src] = r
-            files_total += r["files"]
-            parts_total += r["parts"]
-            errors_total += r["errors"]
-        except Exception as e:
-            logging.error(f"[{src}] preprocess failed: {e}", exc_info=True)
-            summary[src] = {"error": str(e)}
-            errors_total += 1
+        # 처리할 날짜 목록 결정
+        if crawl_date == "all":
+            try:
+                dates_to_process = _list_dates_for_source(svc, src)
+            except Exception as e:
+                logging.error(f"[{src}] date listing failed: {e}", exc_info=True)
+                summary[src] = {"error": f"date listing failed: {e}"}
+                errors_total += 1
+                continue
+            logging.info(f"[{src}] all-dates mode: {len(dates_to_process)} dates → {dates_to_process}")
+        else:
+            dates_to_process = [crawl_date]
+
+        src_files = 0
+        src_parts = 0
+        src_errors = 0
+        src_per_date = {}
+        for d in dates_to_process:
+            try:
+                r = _process_source(svc, src, d, workers)
+                src_per_date[d] = r
+                src_files += r["files"]
+                src_parts += r["parts"]
+                src_errors += r["errors"]
+            except Exception as e:
+                logging.error(f"[{src}][{d}] preprocess failed: {e}", exc_info=True)
+                src_per_date[d] = {"error": str(e)}
+                src_errors += 1
+
+        if crawl_date == "all":
+            summary[src] = {
+                "files": src_files,
+                "parts": src_parts,
+                "errors": src_errors,
+                "dates": src_per_date,
+            }
+        else:
+            # 단일 날짜 호출은 기존 응답 스키마 유지
+            summary[src] = src_per_date.get(dates_to_process[0], {"files": 0, "parts": 0, "errors": 0, "uploaded": []})
+
+        files_total += src_files
+        parts_total += src_parts
+        errors_total += src_errors
 
     elapsed = round((datetime.now(timezone.utc) - start).total_seconds(), 2)
     status = "success" if errors_total == 0 else "partial"

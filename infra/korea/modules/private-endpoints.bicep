@@ -33,6 +33,15 @@ param keyVaultId string
 @description('Blob Private DNS Zone ID')
 param blobDnsZoneId string
 
+@description('Queue Private DNS Zone ID (Durable Functions)')
+param queueDnsZoneId string
+
+@description('Table Private DNS Zone ID (Durable Functions)')
+param tableDnsZoneId string
+
+@description('File Private DNS Zone ID (EP1 Functions Files share)')
+param fileDnsZoneId string
+
 @description('AI Search Private DNS Zone ID')
 param searchDnsZoneId string
 
@@ -78,6 +87,102 @@ resource storageBlobDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneG
       {
         name: 'blob'
         properties: { privateDnsZoneId: blobDnsZoneId }
+      }
+    ]
+  }
+}
+
+// ── Storage Queue Private Endpoint (Durable Functions control queues) ──
+resource storageQueuePe 'Microsoft.Network/privateEndpoints@2024-01-01' = {
+  name: 'pe-queue-ragi-${take(suffix, 8)}'
+  location: location
+  properties: {
+    subnet: { id: pepSubnetId }
+    privateLinkServiceConnections: [
+      {
+        name: 'pe-queue-conn'
+        properties: {
+          privateLinkServiceId: storageAccountId
+          groupIds: ['queue']
+        }
+      }
+    ]
+  }
+  tags: { project: 'rag-indexing-lab' }
+}
+
+resource storageQueueDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-01-01' = {
+  parent: storageQueuePe
+  name: 'queue-dns-group'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'queue'
+        properties: { privateDnsZoneId: queueDnsZoneId }
+      }
+    ]
+  }
+}
+
+// ── Storage Table Private Endpoint (Durable Functions History/Instances tables) ──
+resource storageTablePe 'Microsoft.Network/privateEndpoints@2024-01-01' = {
+  name: 'pe-table-ragi-${take(suffix, 8)}'
+  location: location
+  properties: {
+    subnet: { id: pepSubnetId }
+    privateLinkServiceConnections: [
+      {
+        name: 'pe-table-conn'
+        properties: {
+          privateLinkServiceId: storageAccountId
+          groupIds: ['table']
+        }
+      }
+    ]
+  }
+  tags: { project: 'rag-indexing-lab' }
+}
+
+resource storageTableDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-01-01' = {
+  parent: storageTablePe
+  name: 'table-dns-group'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'table'
+        properties: { privateDnsZoneId: tableDnsZoneId }
+      }
+    ]
+  }
+}
+
+// ── Storage File Private Endpoint (EP1 Functions WEBSITE_CONTENTSHARE) ──
+resource storageFilePe 'Microsoft.Network/privateEndpoints@2024-01-01' = {
+  name: 'pe-file-ragi-${take(suffix, 8)}'
+  location: location
+  properties: {
+    subnet: { id: pepSubnetId }
+    privateLinkServiceConnections: [
+      {
+        name: 'pe-file-conn'
+        properties: {
+          privateLinkServiceId: storageAccountId
+          groupIds: ['file']
+        }
+      }
+    ]
+  }
+  tags: { project: 'rag-indexing-lab' }
+}
+
+resource storageFileDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-01-01' = {
+  parent: storageFilePe
+  name: 'file-dns-group'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'file'
+        properties: { privateDnsZoneId: fileDnsZoneId }
       }
     ]
   }
@@ -254,6 +359,9 @@ resource kvDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@202
 
 // ── Outputs ──
 output storagePeId string = storageBlobPe.id
+output storageQueuePeId string = storageQueuePe.id
+output storageTablePeId string = storageTablePe.id
+output storageFilePeId string = storageFilePe.id
 output searchPeId string = searchPe.id
 output aiServicesPeId string = aiServicesPe.id
 output docIntelPeId string = docIntelPe.id

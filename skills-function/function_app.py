@@ -3,8 +3,9 @@ Azure Function App - AI Search Custom Skills
 Azure Functions Python v2 프로그래밍 모델
 
 Custom Web API Skills for AI Search Indexer:
-  1. /api/markdown_split   — Markdown 헤더 기반 텍스트 분할
-  2. /api/verbalize        — GPT-5.4 Vision으로 PDF 이미지/도표 설명 생성
+  1. /api/markdown_split   — Markdown 헤더(+길이) 기반 텍스트 분할 (PDF basic 파이프라인)
+  2. /api/pptx_page_split  — PPTX `<!-- PageBreak -->` 기반 슬라이드 단위 분할 (PPTX basic 파이프라인)
+  3. /api/verbalize        — GPT-5.4 Vision으로 PDF 이미지/도표 설명 생성 (Verbalized 파이프라인)
 
 배포 후 AI Search Skillset에서 Custom Web API Skill로 연결하여 사용.
 """
@@ -17,11 +18,24 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import azure.functions as func
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
 from openai import AzureOpenAI
+
+try:
+    import fitz  # PyMuPDF — 페이지 단위 PDF 분할용
+    _HAS_FITZ = True
+except Exception:  # pragma: no cover
+    fitz = None
+    _HAS_FITZ = False
+
+# 병렬화 파라미터
+VERBALIZE_PAGE_WORKERS = int(os.environ.get("VERBALIZE_PAGE_WORKERS", "8"))
+VERBALIZE_RECORD_WORKERS = int(os.environ.get("VERBALIZE_RECORD_WORKERS", "4"))
+VERBALIZE_PAGE_CHAR_LIMIT = int(os.environ.get("VERBALIZE_PAGE_CHAR_LIMIT", "8000"))
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -313,51 +327,104 @@ VERBALIZATION_SYSTEM_PROMPT = """당신은 PDF 문서의 이미지와 도표를 
 """
 
 
+def _split_markdown_by_pagebreak(markdown_text: str) -> list[str]:
+    """DI Layout 이 삽입한 `<!-- PageBreak -->` 기준으로 페이지 단위 분할."""
+    if not markdown_text:
+        return []
+    parts = re.split(r"<!--\s*PageBreak\s*-->", markdown_text)
+    return [p.strip() for p in parts if p and p.strip()]
+
+
+def _split_pdf_pages_base64(pdf_base64: str) -> list[str]:
+    """PDF base64 를 페이지별 base64 PDF 리스트로 분할. 실패 시 빈 리스트."""
+    if not pdf_base64 or not _HAS_FITZ:
+        return []
+    try:
+        raw = base64.b64decode(pdf_base64)
+        src = fitz.open(stream=raw, filetype="pdf")
+        out: list[str] = []
+        for i in range(src.page_count):
+            dst = fitz.open()
+            dst.insert_pdf(src, from_page=i, to_page=i)
+            buf = dst.tobytes()
+            dst.close()
+            out.append(base64.b64encode(buf).decode("ascii"))
+        src.close()
+        return out
+    except Exception as e:
+        logging.warning(f"PDF page split failed: {e}")
+        return []
+
+
+def _verbalize_page(client: AzureOpenAI, page_md: str, page_pdf_b64: str) -> str:
+    """단일 페이지 markdown + PDF 페이지 base64 를 GPT-5.4 로 verbalize."""
+    if not page_md.strip():
+        return page_md
+    content: list[dict] = [
+        {
+            "type": "text",
+            "text": (
+                "다음은 PDF 한 페이지의 markdown 텍스트입니다. "
+                "제공된 PDF 페이지 이미지를 참고하여 도표/차트/이미지 설명을 추가해주세요.\n\n"
+                f"--- MARKDOWN ---\n{page_md[:VERBALIZE_PAGE_CHAR_LIMIT]}"
+            ),
+        }
+    ]
+    if page_pdf_b64:
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:application/pdf;base64,{page_pdf_b64}",
+                "detail": "high",
+            },
+        })
+    try:
+        resp = client.chat.completions.create(
+            model=GPT54_DEPLOYMENT,
+            messages=[
+                {"role": "system", "content": VERBALIZATION_SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ],
+            max_tokens=4096,
+            temperature=0.1,
+        )
+        enriched = resp.choices[0].message.content
+        return enriched if enriched else page_md
+    except Exception as e:
+        logging.warning(f"GPT-5.4 page verbalization failed: {e}")
+        return page_md
+
+
 def _verbalize_with_gpt54(markdown_text: str, pdf_base64: str) -> str:
     """
-    GPT-5.4 Vision을 사용하여 PDF 내 이미지/도표를 설명하고 markdown에 삽입.
-    pdf_base64: PDF 파일의 base64 인코딩 데이터
+    문서를 페이지(<!-- PageBreak -->) 단위로 나눠 GPT-5.4 호출을 병렬화.
+    PyMuPDF 로 PDF 도 페이지별로 조각내서 각 GPT 호출이 해당 페이지만 볼 수 있도록 함.
+    페이지 수와 PDF 페이지 수가 다르면 안전하게 원본 PDF 전체를 fallback 으로 사용.
     """
     if not markdown_text.strip():
         return markdown_text
 
+    pages = _split_markdown_by_pagebreak(markdown_text)
+    if not pages:
+        return markdown_text
+
+    pdf_pages = _split_pdf_pages_base64(pdf_base64) if pdf_base64 else []
+    use_per_page_pdf = bool(pdf_pages) and len(pdf_pages) == len(pages)
+
     client = _get_openai_client()
 
-    # PDF를 이미지로 전달 (GPT-5.4는 PDF 직접 처리 가능)
-    messages = [
-        {"role": "system", "content": VERBALIZATION_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"다음은 PDF에서 추출된 markdown 텍스트입니다. "
-                    f"PDF 이미지를 참고하여 도표/차트/이미지에 대한 설명을 추가해주세요.\n\n"
-                    f"--- MARKDOWN ---\n{markdown_text[:8000]}",
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:application/pdf;base64,{pdf_base64}",
-                        "detail": "high",
-                    },
-                },
-            ],
-        },
-    ]
+    def _run(idx: int) -> tuple[int, str]:
+        page_md = pages[idx]
+        page_pdf = pdf_pages[idx] if use_per_page_pdf else (pdf_base64 if not pdf_pages else "")
+        return idx, _verbalize_page(client, page_md, page_pdf)
 
-    try:
-        response = client.chat.completions.create(
-            model=GPT54_DEPLOYMENT,
-            messages=messages,
-            max_tokens=4096,
-            temperature=0.1,
-        )
-        enriched = response.choices[0].message.content
-        return enriched if enriched else markdown_text
-    except Exception as e:
-        logging.warning(f"GPT-5.4 verbalization failed: {e}, returning original text")
-        return markdown_text
+    results: list[str] = [""] * len(pages)
+    workers = max(1, min(VERBALIZE_PAGE_WORKERS, len(pages)))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for idx, text in ex.map(_run, range(len(pages))):
+            results[idx] = text
+
+    return "\n\n<!-- PageBreak -->\n\n".join(results)
 
 
 @app.route(route="verbalize", methods=["POST"])
@@ -399,20 +466,18 @@ def verbalize(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
         )
 
-    results = []
-    for record in body.get("values", []):
+    records = body.get("values", []) or []
+
+    def _process(record: dict) -> dict:
         record_id = record.get("recordId", "")
         data = record.get("data", {})
         markdown_text = _coerce_text(data.get("markdown_text", ""))
         file_data = data.get("file_data", {})
-
-        # file_data는 AI Search에서 전달하는 base64 인코딩 파일
         pdf_base64 = ""
         if isinstance(file_data, dict):
             pdf_base64 = file_data.get("data", "")
         elif isinstance(file_data, str):
             pdf_base64 = file_data
-
         try:
             if pdf_base64 and markdown_text:
                 verbalized = _verbalize_with_gpt54(markdown_text, pdf_base64)
@@ -420,21 +485,27 @@ def verbalize(req: func.HttpRequest) -> func.HttpResponse:
                 verbalized = markdown_text
                 if not pdf_base64:
                     logging.warning(f"No file_data for record {record_id}, skipping verbalization")
-
-            results.append({
+            return {
                 "recordId": record_id,
                 "data": {"verbalized_text": verbalized},
                 "errors": [],
                 "warnings": [],
-            })
+            }
         except Exception as e:
             logging.error(f"verbalize error for record {record_id}: {e}")
-            results.append({
+            return {
                 "recordId": record_id,
                 "data": {"verbalized_text": markdown_text},
                 "errors": [{"message": str(e)}],
                 "warnings": [],
-            })
+            }
+
+    if len(records) <= 1:
+        results = [_process(r) for r in records]
+    else:
+        workers = max(1, min(VERBALIZE_RECORD_WORKERS, len(records)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            results = list(ex.map(_process, records))
 
     return func.HttpResponse(
         json.dumps({"values": results}),

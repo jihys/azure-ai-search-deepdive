@@ -112,6 +112,57 @@ resource blobDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020
   }
 }
 
+// ── Private DNS Zone: Storage Queue (Durable Functions control queues) ──
+resource queueDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.queue.core.windows.net'
+  location: 'global'
+  tags: { project: 'rag-indexing-lab' }
+}
+
+resource queueDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: queueDnsZone
+  name: 'link-queue-${take(suffix, 8)}'
+  location: 'global'
+  properties: {
+    virtualNetwork: { id: vnet.id }
+    registrationEnabled: false
+  }
+}
+
+// ── Private DNS Zone: Storage Table (Durable Functions History/Instances tables) ──
+resource tableDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.table.core.windows.net'
+  location: 'global'
+  tags: { project: 'rag-indexing-lab' }
+}
+
+resource tableDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: tableDnsZone
+  name: 'link-table-${take(suffix, 8)}'
+  location: 'global'
+  properties: {
+    virtualNetwork: { id: vnet.id }
+    registrationEnabled: false
+  }
+}
+
+// ── Private DNS Zone: Storage File (EP1 Functions WEBSITE_CONTENTSHARE) ──
+resource fileDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.file.core.windows.net'
+  location: 'global'
+  tags: { project: 'rag-indexing-lab' }
+}
+
+resource fileDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: fileDnsZone
+  name: 'link-file-${take(suffix, 8)}'
+  location: 'global'
+  properties: {
+    virtualNetwork: { id: vnet.id }
+    registrationEnabled: false
+  }
+}
+
 // ── Private DNS Zone: AI Search ──
 resource searchDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
   name: 'privatelink.search.windows.net'
@@ -222,6 +273,9 @@ output funcSubnetId string = '${vnet.id}/subnets/${funcSubnetName}'
 output funcFc1SubnetId string = '${vnet.id}/subnets/${funcFc1SubnetName}'
 output jumpSubnetId string = '${vnet.id}/subnets/${jumpSubnetName}'
 output blobDnsZoneId string = blobDnsZone.id
+output queueDnsZoneId string = queueDnsZone.id
+output tableDnsZoneId string = tableDnsZone.id
+output fileDnsZoneId string = fileDnsZone.id
 output searchDnsZoneId string = searchDnsZone.id
 output cogServicesDnsZoneId string = cogServicesDnsZone.id
 output openaiDnsZoneId string = openaiDnsZone.id

@@ -55,6 +55,13 @@ UPLOAD_RETRY_COUNT = int(os.environ.get("UPLOAD_RETRY_COUNT", "2"))
 RETRY_SLEEP_SECONDS = float(os.environ.get("RETRY_SLEEP_SECONDS", "1.0"))
 PREPROCESS_FUNCTION_URI = os.environ.get("PREPROCESS_FUNCTION_URI", "")
 PREPROCESS_TIMEOUT_SECONDS = int(os.environ.get("PREPROCESS_TIMEOUT_SECONDS", "3600"))
+PREPROCESS_RETRY_COUNT = int(os.environ.get("PREPROCESS_RETRY_COUNT", "3"))  # 총 시도 횟수 (1=재시도 안 함)
+PREPROCESS_RETRY_BACKOFF_SECONDS = float(os.environ.get("PREPROCESS_RETRY_BACKOFF_SECONDS", "10.0"))
+# crawl Function 은 Consumption plan 의 230s gateway timeout 한계가 있어,
+# preprocess 완료까지 동기 대기하면 504 GatewayTimeout 으로 응답이 잘림.
+# 따라서 preprocess HTTP 호출을 짧은 wait 후 "dispatched" 로 종료하고,
+# preprocess Function 은 자기 플랜에서 백그라운드로 계속 실행됨.
+PREPROCESS_DISPATCH_WAIT_SECONDS = int(os.environ.get("PREPROCESS_DISPATCH_WAIT_SECONDS", "30"))
 
 _CRAWLERS = {
     "prec":   (LawPrecedentCrawler, "precSeq"),
@@ -139,12 +146,19 @@ def crawl(req: func.HttpRequest) -> func.HttpResponse:
                 counts[target] = 0
                 crawl_logs[target] = None
 
-    # 크롤 완료 후 preprocess Function 호출 (각 소스 병렬, 각 호출 fire-and-forget 시작 + 결과 대기)
+    # 크롤 완료 후 preprocess Function 호출 (각 소스 병렬, 재시도 포함)
     preprocess_results = _invoke_preprocess(targets, date_folder, triggered_by)
+
+    # preprocess 단일 소스라도 실패하면 전체 응답 status 도 partial 로 표시
+    preprocess_failed = [
+        src for src, r in preprocess_results.items()
+        if isinstance(r, dict) and r.get("status") not in ("success", "dispatched")
+    ] if isinstance(preprocess_results, dict) else []
+    overall_status = "success" if not preprocess_failed else "partial_preprocess_failed"
 
     elapsed = round((datetime.now(timezone.utc) - start).total_seconds(), 2)
     result = {
-        "status": "success",
+        "status": overall_status,
         "triggered_by": triggered_by,
         "date_folder": date_folder,
         "counts": counts,
@@ -156,13 +170,16 @@ def crawl(req: func.HttpRequest) -> func.HttpResponse:
         "retried_sources": retried_sources,
         "crawl_logs": crawl_logs,
         "preprocess": preprocess_results,
+        "preprocess_failed_sources": preprocess_failed,
         "elapsed_seconds": elapsed,
         "timestamp": start.isoformat(),
     }
-    logging.info(f"Crawl complete: {result}")
+    logging.info(f"Crawl complete: status={overall_status} preprocess_failed={preprocess_failed}")
+    # preprocess 가 모두 성공했을 때만 200, 부분 실패시 207 (Multi-Status) 로 호출자가 인지하도록 함
+    http_status = 200 if not preprocess_failed else 207
     return func.HttpResponse(
         json.dumps(result, ensure_ascii=False),
-        status_code=200, mimetype="application/json",
+        status_code=http_status, mimetype="application/json",
     )
 
 
@@ -180,42 +197,92 @@ def _invoke_preprocess(targets: list[str], date_folder: str, triggered_by: str) 
             "crawl_date": date_folder,
             "triggered_by": f"crawl-function-after:{triggered_by}",
         }).encode("utf-8")
-        req = urllib.request.Request(
-            PREPROCESS_FUNCTION_URI,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        t0 = time.time()
-        try:
-            with urllib.request.urlopen(req, timeout=PREPROCESS_TIMEOUT_SECONDS) as resp:
-                payload = resp.read().decode("utf-8", errors="replace")
-                try:
-                    parsed = json.loads(payload)
-                except json.JSONDecodeError:
-                    parsed = {"raw": payload[:500]}
-                return {
+
+        last_error: dict | None = None
+        for attempt in range(1, PREPROCESS_RETRY_COUNT + 1):
+            req = urllib.request.Request(
+                PREPROCESS_FUNCTION_URI,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            t0 = time.time()
+            try:
+                # 짧은 timeout 으로 preprocess 호출만 dispatch — 응답 본문은 기다리지 않음.
+                # preprocess Function 은 자기 플랜의 functionTimeout 까지 백그라운드로 실행됨.
+                with urllib.request.urlopen(req, timeout=PREPROCESS_DISPATCH_WAIT_SECONDS) as resp:
+                    payload = resp.read().decode("utf-8", errors="replace")
+                    try:
+                        parsed = json.loads(payload)
+                    except json.JSONDecodeError:
+                        parsed = {"raw": payload[:500]}
+                    return {
+                        "source": src,
+                        "status": "success",
+                        "http_status": resp.status,
+                        "attempts": attempt,
+                        "elapsed_seconds": round(time.time() - t0, 2),
+                        "response": parsed,
+                    }
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode("utf-8", errors="replace")[:500]
+                last_error = {
                     "source": src,
-                    "status": "success",
-                    "http_status": resp.status,
+                    "status": "http_error",
+                    "http_status": e.code,
+                    "attempts": attempt,
                     "elapsed_seconds": round(time.time() - t0, 2),
-                    "response": parsed,
+                    "error": err_body,
                 }
-        except urllib.error.HTTPError as e:
-            return {
-                "source": src,
-                "status": "http_error",
-                "http_status": e.code,
-                "elapsed_seconds": round(time.time() - t0, 2),
-                "error": e.read().decode("utf-8", errors="replace")[:500],
-            }
-        except Exception as e:
-            return {
-                "source": src,
-                "status": "error",
-                "elapsed_seconds": round(time.time() - t0, 2),
-                "error": str(e),
-            }
+                # 4xx (응답이 명시적 client error) 는 재시도해도 의미 없음 → 즉시 종료
+                if 400 <= e.code < 500:
+                    logging.error(f"[preprocess:{src}] HTTP {e.code} (4xx, no retry): {err_body[:200]}")
+                    return last_error
+                logging.warning(f"[preprocess:{src}] HTTP {e.code} attempt {attempt}/{PREPROCESS_RETRY_COUNT}: {err_body[:200]}")
+            except (TimeoutError, urllib.error.URLError) as e:
+                # TimeoutError / URLError(socket timeout) = 응답 대기 시간 초과.
+                # preprocess Function 은 이미 받았고 백그라운드 실행 중 → "dispatched" 로 처리.
+                elapsed = time.time() - t0
+                # 정말 connect 자체가 실패한 경우와 구분하기 위해, dispatch wait 의 80% 이상 흘렀으면 dispatched 로 간주.
+                if elapsed >= PREPROCESS_DISPATCH_WAIT_SECONDS * 0.8:
+                    logging.info(
+                        f"[preprocess:{src}] dispatched (no wait for response): elapsed={elapsed:.1f}s "
+                        f"(preprocess Function 은 백그라운드로 계속 실행됨)"
+                    )
+                    return {
+                        "source": src,
+                        "status": "dispatched",
+                        "attempts": attempt,
+                        "elapsed_seconds": round(elapsed, 2),
+                        "note": "fire-and-forget: preprocess running in background; check processed-documents/{src}/{date}/ later",
+                    }
+                # 빠른 실패는 진짜 네트워크 에러 → 재시도
+                last_error = {
+                    "source": src,
+                    "status": "error",
+                    "attempts": attempt,
+                    "elapsed_seconds": round(elapsed, 2),
+                    "error": f"{type(e).__name__}: {e}",
+                }
+                logging.warning(f"[preprocess:{src}] {type(e).__name__} attempt {attempt}/{PREPROCESS_RETRY_COUNT}: {e}")
+            except Exception as e:
+                last_error = {
+                    "source": src,
+                    "status": "error",
+                    "attempts": attempt,
+                    "elapsed_seconds": round(time.time() - t0, 2),
+                    "error": str(e),
+                }
+                logging.warning(f"[preprocess:{src}] error attempt {attempt}/{PREPROCESS_RETRY_COUNT}: {e}")
+
+            if attempt < PREPROCESS_RETRY_COUNT:
+                # exponential backoff: 10s, 20s, 40s ...
+                sleep_s = PREPROCESS_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                logging.info(f"[preprocess:{src}] retry in {sleep_s:.0f}s ...")
+                time.sleep(sleep_s)
+
+        logging.error(f"[preprocess:{src}] 모든 재시도 실패 ({PREPROCESS_RETRY_COUNT}회): {last_error}")
+        return last_error or {"source": src, "status": "error", "error": "unknown"}
 
     results = {}
     with ThreadPoolExecutor(max_workers=max(len(targets), 1)) as ex:
@@ -247,21 +314,23 @@ def _make_blob_client() -> BlobServiceClient | None:
 
 
 def _get_existing_seqs(blob_client: BlobServiceClient | None, source: str) -> set[str]:
-    """Blob Storage에서 이미 크롤링된 seq ID 목록 (모든 날짜 폴더 통합)"""
+    """Blob Storage에서 이미 크롤링된 seq ID 목록 (모든 날짜 폴더 통합).
+
+    IMPORTANT: list_blobs 가 실패하면 절대 빈 set 을 반환하지 말고 예외를 그대로 raise 한다.
+    빈 set 을 반환하면 후속 크롤이 "기존 blob 없음" 으로 판단하여 cross-date 중복을
+    생성한다 (과거 admrul:92 / expc:282 중복의 근본 원인). 호출자가 retry/abort 를 결정해야 한다.
+    """
     if not blob_client:
+        # 의도적으로 blob_client 가 없는 경우만 빈 set 허용 (로컬 dry-run 등)
         return set()
-    try:
-        container = blob_client.get_container_client(BLOB_CONTAINER_NAME)
-        seqs = set()
-        for blob in container.list_blobs(name_starts_with=f"{source}/"):
-            filename = blob.name.rsplit("/", 1)[-1]
-            if filename.startswith(f"{source}_") and filename.endswith(".json"):
-                seqs.add(filename[len(f"{source}_"):-5])
-        logging.info(f"[{source}] 기존 blob {len(seqs)}건 발견 → 크롤링 제외")
-        return seqs
-    except Exception as e:
-        logging.warning(f"[{source}] 기존 blob 조회 실패: {e}")
-        return set()
+    container = blob_client.get_container_client(BLOB_CONTAINER_NAME)
+    seqs = set()
+    for blob in container.list_blobs(name_starts_with=f"{source}/"):
+        filename = blob.name.rsplit("/", 1)[-1]
+        if filename.startswith(f"{source}_") and filename.endswith(".json"):
+            seqs.add(filename[len(f"{source}_"):-5])
+    logging.info(f"[{source}] 기존 blob {len(seqs)}건 발견 → 크롤링 제외")
+    return seqs
 
 
 def _process_source(
@@ -308,6 +377,13 @@ def _process_source(
             return
 
         seq = doc.get("seq", doc.get("id", "unknown"))
+        seq_key = str(seq)
+        # cross-date 중복 방어: 이미 다른 날짜에 있다면 skip (existing_seqs 는 함수 시작 시 캡처)
+        if seq_key in existing_seqs:
+            with state_lock:
+                skipped_existing += 1
+            _write_log({"seq": seq_key, "status": "skipped_cross_date_existing"})
+            return
         blob_name = f"{target}/{date_folder}/{target}_{seq}.json"
 
         last_error = None
@@ -485,6 +561,13 @@ def _fetch_and_upload_batch(
     container = blob_client.get_container_client(BLOB_CONTAINER_NAME) if blob_client else None
     settings = ContentSettings(content_type="application/json", content_encoding="utf-8")
 
+    # 업로드 직전 cross-date 중복 방어선:
+    # list activity 와 detail activity 사이에 시간 간격이 있고 (다른 orchestrator 인스턴스가
+    # 동시 실행 중이거나 retry 가 발생할 수 있으므로) 업로드 시점에 다시 한 번 모든 날짜
+    # 폴더에서 동일 seq 가 존재하는지 확인한다. 이미 존재하면 다른 date_folder 라 하더라도
+    # skip 하여 cross-date 중복을 막는다.
+    existing_at_upload = _get_existing_seqs(blob_client, source)
+
     saved: list[str] = []
     skipped_existing = 0
     upload_failed = 0
@@ -498,6 +581,14 @@ def _fetch_and_upload_batch(
         if not container:
             return
         seq = doc.get("seq", doc.get("id", "unknown"))
+        seq_key = str(seq)
+        # cross-date 중복 방어: 이미 다른 날짜 폴더에 있으면 skip
+        if seq_key in existing_at_upload:
+            with state_lock:
+                skipped_existing += 1
+            with log_lock:
+                log_entries.append({"seq": seq_key, "status": "skipped_cross_date_existing"})
+            return
         blob_name = f"{source}/{date_folder}/{source}_{seq}.json"
         last_error = None
         for attempt in range(1, UPLOAD_RETRY_COUNT + 2):
@@ -789,12 +880,14 @@ def crawl_preprocess_orchestrator(context: df.DurableOrchestrationContext):
         logging.info(f"[orch:{context.instance_id}] crawl done: {crawl_summary}")
 
     # ─── Step 3: Preprocess (parallel across sources) ───
+    # 항상 모든 날짜를 재처리("all")해 raw-documents 전체와 processed-documents 가 일치하도록 보장.
+    # (특정 날짜 단일 처리는 cross-date 중복/누락을 야기하므로 사용하지 않음)
     preprocess_summary = None
     if not skip_preprocess:
         pre_tasks = [
             context.call_activity("activity_preprocess_source", {
                 "source": s,
-                "crawl_date": crawl_date,
+                "crawl_date": "all",
                 "triggered_by": f"durable:{triggered_by}",
             })
             for s in targets

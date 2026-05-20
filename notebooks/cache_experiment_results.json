@@ -1,0 +1,79 @@
+{
+  "experiment_start": "2026-05-19T23:42:27.064185",
+  "experiment_end": "2026-05-20T00:34:23.030698",
+  "total_elapsed_sec": 3115.966513,
+  "source": "detc",
+  "indexer": "const-blob-indexer",
+  "blob_before": {
+    "prec-court-index": -1,
+    "const-court-index": -1,
+    "legis-interp-index": -1,
+    "admin-appeal-index": -1
+  },
+  "blob_after": {
+    "prec-court-index": -1,
+    "const-court-index": -1,
+    "legis-interp-index": -1,
+    "admin-appeal-index": -1
+  },
+  "jsonl_before": {
+    "prec-court-index": -1,
+    "const-court-index": -1,
+    "legis-interp-index": -1,
+    "admin-appeal-index": -1
+  },
+  "jsonl_after": {
+    "prec-court-index": -1,
+    "const-court-index": -1,
+    "legis-interp-index": -1,
+    "admin-appeal-index": -1
+  },
+  "docs_before": {
+    "prec-court-index": 95802,
+    "const-court-index": 0,
+    "legis-interp-index": 8715,
+    "admin-appeal-index": 29107
+  },
+  "docs_after": {
+    "prec-court-index": 95802,
+    "const-court-index": 38086,
+    "legis-interp-index": 8715,
+    "admin-appeal-index": 29107
+  },
+  "scenarios": {
+    "A": {
+      "label": "파이프라인 초기화 (캐시 OFF, 생성만)",
+      "elapsed": 12.465744495391846,
+      "rc": 0
+    },
+    "B": {
+      "label": "캐시 ON 전체 재인덱싱 (1차, 캐시 채움)",
+      "elapsed": 1534.7704856967925,
+      "rc": 0,
+      "status": "success",
+      "items": 38093,
+      "failed": 7
+    },
+    "B.5": {
+      "label": "크롤링 신규 데이터 추가 (0건)",
+      "elapsed": 4.2,
+      "status": "error",
+      "added": 0
+    },
+    "C": {
+      "label": "Incremental Update (신규 0건)",
+      "elapsed": 17.6,
+      "status": "success",
+      "items": 0,
+      "failed": 0
+    },
+    "D": {
+      "label": "캐시 ON 전체 재인덱싱 (2차, 캐시 재사용)",
+      "elapsed": 1529.2666015625,
+      "rc": 0,
+      "status": "success",
+      "items": 0,
+      "failed": 0
+    }
+  }
+}

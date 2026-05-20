@@ -38,6 +38,12 @@ resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' = {
     // Private Network: 공개 인터넷 접근 차단
     publicNetworkAccess: 'enabled'
     semanticSearch: 'standard'
+    // RBAC + API key 둘 다 허용 (기본값은 apiKeyOnly 이므로 명시 필요 — 안 그러면 Bearer 토큰 403)
+    authOptions: {
+      aadOrApiKey: {
+        aadAuthFailureMode: 'http403'
+      }
+    }
   }
   identity: {
     type: 'SystemAssigned'

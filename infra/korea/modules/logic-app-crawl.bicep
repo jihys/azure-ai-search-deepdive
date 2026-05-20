@@ -100,6 +100,9 @@ resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
               max_pages: crawlerLimit
               detail_workers: detailWorkers
               triggered_by: 'logic-app-durable'
+              // crawl_date 는 오늘 날짜 폴더에 raw json 을 저장하는 용도로만 쓰임.
+              // preprocess 호출 시 orchestrator 내부에서 항상 "all" 로 강제하여
+              // 모든 날짜의 raw-documents 가 processed-documents 와 일치하도록 보장됨.
               crawl_date: '@{variables(\'crawlDate\')}'
               skip_preprocess: false
             }

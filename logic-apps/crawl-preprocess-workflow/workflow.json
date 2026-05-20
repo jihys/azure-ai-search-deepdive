@@ -112,7 +112,7 @@
                   "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
                   "body": {
                     "source": "prec",
-                    "crawl_date": "@{variables('crawlDate')}",
+                    "crawl_date": "all",
                     "triggered_by": "logic-app-crawl-preprocess"
                   },
                   "headers": {
@@ -133,7 +133,7 @@
                   "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
                   "body": {
                     "source": "detc",
-                    "crawl_date": "@{variables('crawlDate')}",
+                    "crawl_date": "all",
                     "triggered_by": "logic-app-crawl-preprocess"
                   },
                   "headers": {
@@ -154,7 +154,7 @@
                   "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
                   "body": {
                     "source": "expc",
-                    "crawl_date": "@{variables('crawlDate')}",
+                    "crawl_date": "all",
                     "triggered_by": "logic-app-crawl-preprocess"
                   },
                   "headers": {
@@ -175,7 +175,7 @@
                   "uri": "@{appsetting('PREPROCESS_FUNCTION_URI')}",
                   "body": {
                     "source": "admrul",
-                    "crawl_date": "@{variables('crawlDate')}",
+                    "crawl_date": "all",
                     "triggered_by": "logic-app-crawl-preprocess"
                   },
                   "headers": {

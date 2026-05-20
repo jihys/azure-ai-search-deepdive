@@ -42,7 +42,11 @@ param searchSku string = 'standard'
 param blobContainerName string = 'raw-documents'
 
 @description('크롤러가 수집할 법령 건수')
-param crawlerLimit int = 10
+// 일별 크롤 페이지 상한 (page_count). 100 items/page 기준.
+//   10  = 평상시 (신규 분만 빠르게)
+//   600 = 백필 모드 (LIST_MAX_WAVES 20 × LIST_PAGE_CHUNK 30 = 사이트 전체 훑기)
+// 평상시로 되돌릴 때는 10 으로 변경.
+param crawlerLimit int = 600
 
 @description('JumpVM 관리자 계정명')
 param jumpvmAdminUsername string = 'azureadmin'
@@ -85,7 +89,7 @@ resource rgDocIntel 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 // ============================================
 module vnet 'modules/vnet.bicep' = {
   scope: rgKorea
-  name: 'vnet-deployment'
+  name: 'vnet-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -97,7 +101,7 @@ module vnet 'modules/vnet.bicep' = {
 // ============================================
 module storage 'modules/storage.bicep' = {
   scope: rgKorea
-  name: 'storage-deployment'
+  name: 'storage-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -111,7 +115,7 @@ module storage 'modules/storage.bicep' = {
 // ============================================
 module openai 'modules/openai.bicep' = {
   scope: rgKorea
-  name: 'openai-deployment'
+  name: 'openai-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -119,6 +123,7 @@ module openai 'modules/openai.bicep' = {
     gptDeploymentName: gptDeploymentName
     gptModelName: gptModelName
     gptModelVersion: gptModelVersion
+    userObjectIds: jumpvmEntraUserObjectIds
   }
 }
 
@@ -128,7 +133,7 @@ module openai 'modules/openai.bicep' = {
 // ============================================
 module docIntelligence 'modules/doc-intelligence.bicep' = {
   scope: rgDocIntel
-  name: 'doc-intelligence-deployment'
+  name: 'doc-intelligence-deployment-${take(suffix, 8)}'
   params: {
     location: docIntelLocation
     suffix: suffix
@@ -140,7 +145,7 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
 // ============================================
 module aiSearch 'modules/ai-search.bicep' = {
   scope: rgKorea
-  name: 'ai-search-deployment'
+  name: 'ai-search-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -153,7 +158,7 @@ module aiSearch 'modules/ai-search.bicep' = {
 // AI Search MSI → AOAI RBAC (skillset 의 AzureOpenAIEmbeddingSkill MSI auth)
 module searchToOpenAIRole 'modules/role-search-to-openai.bicep' = {
   scope: rgKorea
-  name: 'role-search-to-openai'
+  name: 'role-search-to-openai-${take(suffix, 8)}'
   params: {
     aoaiAccountName: openai.outputs.accountName
     aiSearchPrincipalId: aiSearch.outputs.searchServicePrincipalId
@@ -165,7 +170,7 @@ module searchToOpenAIRole 'modules/role-search-to-openai.bicep' = {
 // ============================================
 module functionCrawler 'modules/function-crawler.bicep' = {
   scope: rgKorea
-  name: 'function-crawler-deployment'
+  name: 'function-crawler-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -174,6 +179,7 @@ module functionCrawler 'modules/function-crawler.bicep' = {
     storageAccountId: storage.outputs.storageAccountId
     blobContainerName: blobContainerName
     crawlerLimit: crawlerLimit
+    preprocessFunctionAppName: functionPreprocess.outputs.funcAppName
   }
 }
 
@@ -183,7 +189,7 @@ module functionCrawler 'modules/function-crawler.bicep' = {
 // ============================================
 module functionPreprocess 'modules/function-preprocess.bicep' = {
   scope: rgKorea
-  name: 'function-preprocess-deployment'
+  name: 'function-preprocess-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -204,7 +210,7 @@ module functionPreprocess 'modules/function-preprocess.bicep' = {
 // ============================================
 module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' = {
   scope: rgKorea
-  name: 'function-crawler-consumption-deployment'
+  name: 'function-crawler-consumption-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -223,7 +229,7 @@ module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' =
 // ============================================
 module functionSkills 'modules/function-skills.bicep' = {
   scope: rgKorea
-  name: 'function-skills-deployment'
+  name: 'function-skills-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -244,7 +250,7 @@ module functionSkills 'modules/function-skills.bicep' = {
 // ============================================
 module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
   scope: rgKorea
-  name: 'logic-app-crawl-deployment'
+  name: 'logic-app-crawl-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -259,7 +265,7 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
 // ============================================
 module foundryHub 'modules/foundry-hub.bicep' = {
   scope: rgKorea
-  name: 'foundry-hub-deployment'
+  name: 'foundry-hub-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -280,7 +286,7 @@ module foundryHub 'modules/foundry-hub.bicep' = {
 // ============================================
 module privateEndpoints 'modules/private-endpoints.bicep' = {
   scope: rgKorea
-  name: 'private-endpoints-deployment'
+  name: 'private-endpoints-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -292,6 +298,9 @@ module privateEndpoints 'modules/private-endpoints.bicep' = {
     hubId: foundryHub.outputs.hubId
     keyVaultId: foundryHub.outputs.keyVaultId
     blobDnsZoneId: vnet.outputs.blobDnsZoneId
+    queueDnsZoneId: vnet.outputs.queueDnsZoneId
+    tableDnsZoneId: vnet.outputs.tableDnsZoneId
+    fileDnsZoneId: vnet.outputs.fileDnsZoneId
     searchDnsZoneId: vnet.outputs.searchDnsZoneId
     cogServicesDnsZoneId: vnet.outputs.cogServicesDnsZoneId
     openaiDnsZoneId: vnet.outputs.openaiDnsZoneId
@@ -306,7 +315,7 @@ module privateEndpoints 'modules/private-endpoints.bicep' = {
 // ============================================
 module jumpvm 'modules/jumpvm.bicep' = {
   scope: rgKorea
-  name: 'jumpvm-deployment'
+  name: 'jumpvm-deployment-${take(suffix, 8)}'
   params: {
     location: location
     jumpSubnetId: vnet.outputs.jumpSubnetId
@@ -336,10 +345,12 @@ output aiSearchPrincipalId string = aiSearch.outputs.searchServicePrincipalId
 output crawlFunctionUrl string = functionCrawler.outputs.crawlTriggerUrl
 output crawlFunctionName string = functionCrawler.outputs.funcAppName
 output skillsFunctionName string = functionSkills.outputs.funcAppName
+output crawlConsFunctionName string = functionCrawlerConsumption.outputs.funcAppName
 output skillsFunctionUrl string = functionSkills.outputs.skillsFunctionUrl
 output crawlLogicAppName string = logicAppCrawl.outputs.crawlWorkflowName
 output jumpvmName string = jumpvm.outputs.vmName
 output jumpvmPublicIp string = jumpvm.outputs.publicIpAddress
 output foundryHubName string = foundryHub.outputs.hubName
 output foundryProjectName string = foundryHub.outputs.projectName
+output foundryProjectEndpoint string = openai.outputs.foundryProjectEndpoint
 output foundryKeyVaultName string = foundryHub.outputs.keyVaultName

@@ -38,7 +38,11 @@ param searchSku string = 'standard'
 param blobContainerName string = 'raw-documents'
 
 @description('크롤러가 수집할 법령 건수')
-param crawlerLimit int = 10
+// 일별 크롤 페이지 상한 (page_count). 100 items/page 기준.
+//   10  = 평상시 (신규 분만 빠르게)
+//   600 = 백필 모드 (LIST_MAX_WAVES 20 × LIST_PAGE_CHUNK 30 = 사이트 전체 훑기)
+// 평상시로 되돌릴 때는 10 으로 변경.
+param crawlerLimit int = 600
 
 @description('데이터 평면(Storage/AI Search/AI Services/Doc Intelligence) RBAC를 부여할 Entra ID 사용자 Object ID 배열 — 본인 노트북에서 핸즈온 시 본인 Object ID 입력')
 param userObjectIds array = []
@@ -62,7 +66,7 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 // ============================================
 module vnet 'modules/vnet.bicep' = {
   scope: rg
-  name: 'vnet-deployment'
+  name: 'vnet-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -74,7 +78,7 @@ module vnet 'modules/vnet.bicep' = {
 // ============================================
 module storage 'modules/storage.bicep' = {
   scope: rg
-  name: 'storage-deployment'
+  name: 'storage-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -88,7 +92,7 @@ module storage 'modules/storage.bicep' = {
 // ============================================
 module openai 'modules/openai.bicep' = {
   scope: rg
-  name: 'openai-deployment'
+  name: 'openai-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -105,7 +109,7 @@ module openai 'modules/openai.bicep' = {
 // ============================================
 module docIntelligence 'modules/doc-intelligence.bicep' = {
   scope: rg
-  name: 'doc-intelligence-deployment'
+  name: 'doc-intelligence-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -120,7 +124,7 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
 // ============================================
 module aiSearch 'modules/ai-search.bicep' = {
   scope: rg
-  name: 'ai-search-deployment'
+  name: 'ai-search-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -134,7 +138,7 @@ module aiSearch 'modules/ai-search.bicep' = {
 // AI Search MSI → AOAI RBAC (skillset 의 AzureOpenAIEmbeddingSkill MSI auth)
 module searchToOpenAIRole 'modules/role-search-to-openai.bicep' = {
   scope: rg
-  name: 'role-search-to-openai'
+  name: 'role-search-to-openai-${take(suffix, 8)}'
   params: {
     aoaiAccountName: openai.outputs.accountName
     aiSearchPrincipalId: aiSearch.outputs.searchServicePrincipalId
@@ -142,36 +146,16 @@ module searchToOpenAIRole 'modules/role-search-to-openai.bicep' = {
 }
 
 // ============================================
-// Azure Function App (크롤러) - EP1 + VNet Integration
-// Python 크롤러를 Azure에서 실행 (로컬 실행 대체)
-// snet-func → VNet → Storage PE로 아웃바운드 접근
-// ============================================
-module functionCrawler 'modules/function-crawler.bicep' = {
-  scope: rg
-  name: 'function-crawler-deployment'
-  params: {
-    location: location
-    suffix: suffix
-    funcSubnetId: vnet.outputs.funcSubnetId
-    storageAccountName: storage.outputs.storageAccountName
-    storageAccountId: storage.outputs.storageAccountId
-    blobContainerName: blobContainerName
-    crawlerLimit: crawlerLimit
-  }
-}
-
-// ============================================
-// Azure Function App (Preprocess) - 동일 EP1 플랜 공유
+// Azure Function App (Preprocess) - Flex Consumption FC1
 // crawl 후 raw JSON → processed JSONL (Integration) 수행
 // ============================================
-module functionPreprocess 'modules/function-preprocess.bicep' = {
+module functionPreprocess 'modules/function-preprocess-fc1.bicep' = {
   scope: rg
-  name: 'function-preprocess-deployment'
+  name: 'function-preprocess-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
-    funcSubnetId: vnet.outputs.funcSubnetId
-    hostingPlanId: functionCrawler.outputs.hostingPlanId
+    funcSubnetId: vnet.outputs.funcFc1SubnetId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     rawContainerName: blobContainerName
@@ -182,12 +166,11 @@ module functionPreprocess 'modules/function-preprocess.bicep' = {
 // ============================================
 // Azure Function App (Crawler, Flex Consumption FC1)
 // Method B: Durable Functions + Activity 분할
-//   - 기존 EP1 functionCrawler 와 병렬 배포 (이름 다름)
-//   - identity-based deployment storage + VNet integration (snet-func 공유)
+//   - identity-based deployment storage + VNet integration
 // ============================================
 module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' = {
   scope: rg
-  name: 'function-crawler-consumption-deployment'
+  name: 'function-crawler-consumption-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -195,23 +178,22 @@ module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' =
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     blobContainerName: blobContainerName
-    preprocessFunctionAppName: functionPreprocess.outputs.funcAppName
+    preprocessFunctionAppName: 'func-preprocess-ragi-${take(suffix, 8)}'
   }
 }
 
 // ============================================
-// Azure Function App (Skills) - 동일 EP1 플랜 공유
+// Azure Function App (Skills) - Flex Consumption FC1
 // AI Search 멀티모달 skillset 의 Custom WebApi Skills 호스트
 // (markdown_split / pptx_page_split / verbalize)
 // ============================================
-module functionSkills 'modules/function-skills.bicep' = {
+module functionSkills 'modules/function-skills-fc1.bicep' = {
   scope: rg
-  name: 'function-skills-deployment'
+  name: 'function-skills-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
-    funcSubnetId: vnet.outputs.funcSubnetId
-    hostingPlanId: functionCrawler.outputs.hostingPlanId
+    funcSubnetId: vnet.outputs.funcFc1SubnetId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     aiServicesAccountId: openai.outputs.accountId
@@ -228,7 +210,7 @@ module functionSkills 'modules/function-skills.bicep' = {
 // ============================================
 module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
   scope: rg
-  name: 'logic-app-crawl-deployment'
+  name: 'logic-app-crawl-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -245,7 +227,7 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
 // ============================================
 module foundryHub 'modules/foundry-hub.bicep' = {
   scope: rg
-  name: 'foundry-hub-deployment'
+  name: 'foundry-hub-deployment-${take(suffix, 8)}'
   params: {
     location: location
     suffix: suffix
@@ -280,13 +262,15 @@ output aiSearchEndpoint string = aiSearch.outputs.endpoint
 output aiSearchName string = aiSearch.outputs.searchServiceName
 output docIntelligenceEndpoint string = docIntelligence.outputs.endpoint
 output aiSearchPrincipalId string = aiSearch.outputs.searchServicePrincipalId
-output crawlFunctionUrl string = functionCrawler.outputs.crawlTriggerUrl
+output crawlFunctionUrl string = functionCrawlerConsumption.outputs.orchestratorTriggerUrl
 output preprocessFunctionUrl string = functionPreprocess.outputs.preprocessTriggerUrl
-output crawlFunctionName string = functionCrawler.outputs.funcAppName
+output crawlFunctionName string = functionCrawlerConsumption.outputs.funcAppName
 output preprocessFunctionName string = functionPreprocess.outputs.funcAppName
 output skillsFunctionName string = functionSkills.outputs.funcAppName
+output crawlConsFunctionName string = functionCrawlerConsumption.outputs.funcAppName
 output skillsFunctionUrl string = functionSkills.outputs.skillsFunctionUrl
 output crawlLogicAppName string = logicAppCrawl.outputs.crawlWorkflowName
 output foundryHubName string = foundryHub.outputs.hubName
 output foundryProjectName string = foundryHub.outputs.projectName
+output foundryProjectEndpoint string = openai.outputs.foundryProjectEndpoint
 output foundryKeyVaultName string = foundryHub.outputs.keyVaultName

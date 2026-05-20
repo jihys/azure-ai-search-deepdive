@@ -9,7 +9,7 @@ AI Search 법률 데이터 인덱싱 파이프라인 설정 스크립트
 
 파이프라인 흐름:
   Blob Storage (processed-documents/{source}/) — JSONL bundles
-    → JSON Lines 파싱 (parsingMode: jsonLines)
+    → JSON Lines 파싱 (parsingMode: jsonLines) — preprocess 가 생성한 processed-documents/*.jsonl
     → 필드 매핑 (크롤러 한국어 키 → 인덱스 영문 필드)
     → Azure OpenAI Embedding Skill (요지 텍스트 벡터 생성)
     → AI Search Index (저장)
@@ -39,8 +39,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import sys
 import time
+from urllib.parse import urlparse
 
 import requests
 from azure.identity import DefaultAzureCredential
@@ -54,12 +56,81 @@ API_VERSION = "2024-11-01-preview"
 SEARCH_ENDPOINT = os.environ.get("AZURE_SEARCH_ENDPOINT") or os.environ.get("AZURE_SEARCH_SERVICE_ENDPOINT", "")
 SEARCH_ADMIN_KEY = os.environ.get("AZURE_SEARCH_ADMIN_KEY", "")
 STORAGE_RESOURCE_ID = os.environ.get("AZURE_STORAGE_RESOURCE_ID", "")
-STORAGE_CONTAINER = os.environ.get("BLOB_CONTAINER_NAME", "processed-documents")
+# Indexer 는 preprocess 가 JSONL 로 묶은 processed-documents 를 읽어야 하므로 전용 환경변수 사용.
+# (BLOB_CONTAINER_NAME=raw-documents 는 crawler/uploader 용. 세팅 충돌 방지)
+STORAGE_CONTAINER = os.environ.get("AZURE_SEARCH_INDEXING_CONTAINER", "processed-documents")
 OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
 EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-large")
 
 # ── 인증 ──────────────────────────────────────────────────────
-_credential = DefaultAzureCredential() if not SEARCH_ADMIN_KEY else None
+# VM의 Managed Identity 대신 노트북 사용자(`az login`)를 우선 —
+# DefaultAzureCredential 기본 순서에서 IMDS가 먼저 잡히면 RBAC 없는 MI로 403 발생
+from azure.identity import DefaultAzureCredential  # noqa: E402  (re-import for clarity)
+_credential = (
+    DefaultAzureCredential(
+        exclude_managed_identity_credential=True,
+        exclude_workload_identity_credential=True,
+    )
+    if not SEARCH_ADMIN_KEY
+    else None
+)
+
+
+def _normalize_search_endpoint(endpoint: str) -> str:
+    endpoint = (endpoint or "").strip()
+    if not endpoint:
+        return endpoint
+    if not endpoint.startswith(("http://", "https://")):
+        endpoint = f"https://{endpoint}"
+    return endpoint.rstrip("/")
+
+
+def _search_host(endpoint: str) -> str:
+    parsed = urlparse(endpoint)
+    return parsed.hostname or ""
+
+
+def _assert_dns_resolvable(endpoint: str, attempts: int = 3, wait_sec: int = 2) -> None:
+    host = _search_host(endpoint)
+    if not host:
+        raise RuntimeError(f"Invalid AZURE_SEARCH_SERVICE_ENDPOINT: {endpoint}")
+
+    last_exc: Exception | None = None
+    for i in range(1, attempts + 1):
+        try:
+            socket.getaddrinfo(host, 443)
+            return
+        except OSError as exc:
+            last_exc = exc
+            if i < attempts:
+                time.sleep(wait_sec)
+
+    raise RuntimeError(
+        "Failed to resolve Azure AI Search host. "
+        f"host={host}, endpoint={endpoint}. "
+        "Check DNS/network egress in the current environment, and verify that the deployed "
+        "service name and endpoint are correct."
+    ) from last_exc
+
+
+def _request(method: str, url: str, **kwargs) -> requests.Response:
+    tries = kwargs.pop("tries", 3)
+    retry_wait = kwargs.pop("retry_wait", 2)
+
+    last_exc: Exception | None = None
+    for i in range(1, tries + 1):
+        try:
+            return requests.request(method, url, **kwargs)
+        except requests.exceptions.ConnectionError as exc:
+            last_exc = exc
+            if i < tries:
+                time.sleep(retry_wait)
+
+    raise RuntimeError(
+        "Connection to Azure AI Search failed after retries. "
+        f"url={url}. "
+        "If the error includes NameResolutionError, DNS could not resolve the Search endpoint."
+    ) from last_exc
 
 
 def _headers() -> dict[str, str]:
@@ -74,7 +145,7 @@ def _headers() -> dict[str, str]:
 
 def api(method: str, path: str, body: dict | None = None) -> dict:
     url = f"{SEARCH_ENDPOINT}{path}?api-version={API_VERSION}"
-    resp = requests.request(method, url, headers=_headers(), json=body, timeout=120)
+    resp = _request(method, url, headers=_headers(), json=body, timeout=120)
     if resp.status_code not in (200, 201, 202, 204):
         print(f"  ERROR {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
@@ -83,7 +154,7 @@ def api(method: str, path: str, body: dict | None = None) -> dict:
 
 def delete_safe(path: str) -> None:
     url = f"{SEARCH_ENDPOINT}{path}?api-version={API_VERSION}"
-    resp = requests.delete(url, headers=_headers(), timeout=120)
+    resp = _request("DELETE", url, headers=_headers(), timeout=120)
     if resp.status_code in (200, 202, 204):
         print(f"  - 기존 {path} 삭제")
 
@@ -199,8 +270,9 @@ PREC_CONFIG = {
         _str_searchable("courtLevel", filterable=True, facetable=True),
         _str_searchable("caseType", filterable=True, facetable=True),
         _str_searchable("status", filterable=True, facetable=True),
-        _collection_str("relatedLaws"),
+        _text("relatedLaws"),
         _collection_str("keywords"),
+        _str_filter("sourceUrl"),
         _date("registrationDate"),
         # 키워드 검색용 본문
         _text("caseName"),
@@ -220,6 +292,8 @@ PREC_CONFIG = {
         {"sourceFieldName": "판시사항", "targetFieldName": "holdings"},
         {"sourceFieldName": "판결요지", "targetFieldName": "summary"},
         {"sourceFieldName": "전문", "targetFieldName": "fullText"},
+        {"sourceFieldName": "url", "targetFieldName": "sourceUrl"},
+        {"sourceFieldName": "참조조문", "targetFieldName": "relatedLaws"},
     ],
 }
 
@@ -243,8 +317,9 @@ CONST_CONFIG = {
         _str_searchable("caseNumber", filterable=True, sortable=True),
         _date("decisionDate"),
         _str_searchable("decisionType", filterable=True, facetable=True),
-        _collection_str("relatedLaws"),
+        _text("relatedLaws"),
         _collection_str("keywords"),
+        _str_filter("sourceUrl"),
         _str_filter("fiscalYear", sortable=True),
         _date("registrationDate"),
         _text("caseName"),
@@ -261,6 +336,8 @@ CONST_CONFIG = {
         {"sourceFieldName": "판시사항", "targetFieldName": "holdings"},
         {"sourceFieldName": "결정요지", "targetFieldName": "summary"},
         {"sourceFieldName": "전문", "targetFieldName": "fullText"},
+        {"sourceFieldName": "url", "targetFieldName": "sourceUrl"},
+        {"sourceFieldName": "참조조문", "targetFieldName": "relatedLaws"},
     ],
 }
 
@@ -286,6 +363,7 @@ INTERP_CONFIG = {
         _str_searchable("interpType", filterable=True, facetable=True),
         _collection_str("relatedLaws"),
         _collection_str("keywords"),
+        _str_filter("sourceUrl"),
         _date("registrationDate"),
         _text("title"),
         _text("querySummary"),
@@ -301,6 +379,7 @@ INTERP_CONFIG = {
         {"sourceFieldName": "질의요지", "targetFieldName": "querySummary"},
         {"sourceFieldName": "회답", "targetFieldName": "reply"},
         {"sourceFieldName": "이유", "targetFieldName": "reason"},
+        {"sourceFieldName": "url", "targetFieldName": "sourceUrl"},
     ],
 }
 
@@ -326,6 +405,7 @@ ADMIN_CONFIG = {
         _str_searchable("decisionType", filterable=True, facetable=True),
         _collection_str("relatedLaws"),
         _collection_str("keywords"),
+        _str_filter("sourceUrl"),
         _str_searchable("committee", filterable=True, facetable=True),
         _date("registrationDate"),
         _text("caseName"),
@@ -344,6 +424,7 @@ ADMIN_CONFIG = {
         {"sourceFieldName": "주문", "targetFieldName": "order"},
         {"sourceFieldName": "재결요지", "targetFieldName": "reasonSummary"},
         {"sourceFieldName": "이유", "targetFieldName": "fullText"},
+        {"sourceFieldName": "url", "targetFieldName": "sourceUrl"},
     ],
 }
 
@@ -491,11 +572,12 @@ def create_indexer(cfg: dict, schedule: str, start_time: str) -> None:
         "skillsetName": cfg["skillset_name"],
         "targetIndexName": cfg["index_name"],
         "parameters": {
-            "batchSize": 50,
+            "batchSize": 200,
             "maxFailedItems": 5000,
             "maxFailedItemsPerBatch": 1000,
             "configuration": {
                 "dataToExtract": "contentAndMetadata",
+                # processed-documents 의 JSONL 을 읽으므로 jsonLines 사용
                 "parsingMode": "jsonLines",
             },
         },
@@ -529,7 +611,7 @@ def run_indexer(name: str) -> None:
     print(f"  → Indexer '{name}' 실행 요청")
 
 
-def poll_indexer(name: str, timeout_sec: int = 600) -> None:
+def poll_indexer(name: str, timeout_sec: int = 1800) -> None:
     start = time.time()
     while True:
         status = api("GET", f"/indexers/{name}/status")
@@ -564,6 +646,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    global SEARCH_ENDPOINT
 
     if not SEARCH_ENDPOINT:
         print("ERROR: AZURE_SEARCH_SERVICE_ENDPOINT (or AZURE_SEARCH_ENDPOINT) 환경변수 필요")
@@ -574,6 +657,9 @@ def main() -> None:
     if not STORAGE_RESOURCE_ID:
         print("ERROR: AZURE_STORAGE_RESOURCE_ID 환경변수 필요")
         sys.exit(1)
+
+    SEARCH_ENDPOINT = _normalize_search_endpoint(SEARCH_ENDPOINT)
+    _assert_dns_resolvable(SEARCH_ENDPOINT)
 
     targets = list(ALL_CONFIGS.keys()) if args.source == "all" else [args.source]
 
@@ -601,7 +687,7 @@ def main() -> None:
         # Indexer reset 먼저 (cache/change tracking이 있으면 skillset/datasource 변경 불가)
         indexer_name = cfg["indexer_name"]
         reset_url = f"{SEARCH_ENDPOINT}/indexers/{indexer_name}/reset?api-version={API_VERSION}"
-        reset_resp = requests.post(reset_url, headers=_headers(), json={}, timeout=120)
+        reset_resp = _request("POST", reset_url, headers=_headers(), json={}, timeout=120)
         if reset_resp.status_code == 204:
             print(f"  - Indexer '{indexer_name}' reset 완료")
         elif reset_resp.status_code == 404:
