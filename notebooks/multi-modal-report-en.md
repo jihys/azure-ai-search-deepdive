@@ -59,14 +59,14 @@ During experimentation, we confirmed the existence of **two independent caching 
 
 ### 1.3 All Three Pipelines — Summary Comparison
 
-| Pipeline | First Run| Subsequent Update|  Cost Savings (cache HIT) |
-|----------|--------------------:|-------------------------------:|----------------------:|
-| **PDF Built-In** | **434.2s**  | 32.5s | **$6.09** |
-| **PDF VERBALIZED** | **232.9**  | 37.6s |   **$9.64** |
-| **PPTX Built** | **11.3** | 12.7s  | **$2.25** |
+| Pipeline | First Run (DI cold) | Subsequent (DI warm, cache OFF) | Subsequent (DI warm, cache ON) | Est. Cost (1st run) | Cost Savings (cache HIT) |
+|----------|--------------------:|-------------------------------:|------------------------------:|-----------------:|----------------------:|
+| **PDF** | **434.2s** (v3 measured) | 32.5s (v6 B) | 27.5s (v6 C) | $6.09 | **$6.09** |
+| **VERBALIZED** | **~600s** (est.¹) | 37.6s (v6 B) | 53.0s (v6 C²) | $9.64 | **$9.64** |
+| **PPTX** | **~170s** (est.³) | 12.7s (v6 B) | 8.6s (v6 C) | $2.25 | **$2.25** |
 
 > ¹ Verbalized first-run estimate: PDF (434s) + GPT Verbalize calls (~406 pages × ~4s/call ÷ parallelism) ≈ 600s
-> ² Verbalized v6 C slower than B: 4-sㅇkill cache lookup overhead > actual processing time when DI is warm
+> ² Verbalized v6 C slower than B: 4-skill cache lookup overhead > actual processing time when DI is warm
 > ³ PPTX first-run estimate: page ratio vs PDF (150/406 = 0.37) × 434s ≈ 170s
 
 ### Key Findings
@@ -266,7 +266,7 @@ During experimentation, we confirmed the existence of **two independent caching 
 
 | Pipeline | Skill 1 | Skill 2 | Skill 3 | Skill 4 |
 |----------|---------|---------|---------|---------|
-| **Verbalized PDF** | DI Layout (built-in) | GPT Verbalize (WebApi) | Markdown Split (WebApi) | Embedding (built-in) |
+| **Verbalized** | DI Layout (built-in) | GPT Verbalize (WebApi) | Markdown Split (WebApi) | Embedding (built-in) |
 | **PDF Basic** | DI Layout (built-in) | markdown_split (WebApi) | Embedding (built-in) | — |
 | **PPTX Basic** | DI Layout (built-in) | pptx_page_split (WebApi) | Embedding (built-in) | — |
 

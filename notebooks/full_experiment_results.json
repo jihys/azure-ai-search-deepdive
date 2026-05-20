@@ -1,0 +1,111 @@
+{
+  "experiment_date": "2026-05-20",
+  "indexes": {
+    "prec": {
+      "index_name": "prec-court-index",
+      "source_label": "판례",
+      "docs": 105941,
+      "full_reindex": {
+        "status": "success",
+        "processed": 105941,
+        "failed": 0,
+        "duration_s": 4533.661,
+        "startTime": "2026-05-20T03:43:44.363Z",
+        "endTime": "2026-05-20T04:59:18.024Z",
+        "final_count": 105941
+      },
+      "incremental": {
+        "status": "success",
+        "processed": 50,
+        "failed": 0,
+        "duration_s": 20.154,
+        "startTime": "2026-05-20T04:59:38.472Z",
+        "endTime": "2026-05-20T04:59:58.626Z",
+        "before": 105941,
+        "after": 105991,
+        "delta": 50
+      },
+      "speedup": 225.0
+    },
+    "detc": {
+      "index_name": "const-court-index",
+      "source_label": "헌재결정례",
+      "docs": 38136,
+      "full_reindex": {
+        "status": "success",
+        "processed": 38093,
+        "failed": 7,
+        "duration_s": 1530.508,
+        "startTime": "2026-05-20T03:43:57.437Z",
+        "endTime": "2026-05-20T04:09:27.945Z",
+        "final_count": 38136
+      },
+      "incremental": {
+        "status": "success",
+        "processed": 50,
+        "failed": 0,
+        "duration_s": 12.089,
+        "startTime": "2026-05-20T04:59:43.506Z",
+        "endTime": "2026-05-20T04:59:55.595Z",
+        "before": 38136,
+        "after": 38136,
+        "delta": 0
+      },
+      "speedup": 126.6
+    },
+    "expc": {
+      "index_name": "legis-interp-index",
+      "source_label": "법제처해석례",
+      "docs": 8715,
+      "full_reindex": {
+        "status": "success",
+        "processed": 8715,
+        "failed": 0,
+        "duration_s": 517.875,
+        "startTime": "2026-05-20T03:44:09.72Z",
+        "endTime": "2026-05-20T03:52:47.595Z",
+        "final_count": 8715
+      },
+      "incremental": {
+        "status": "success",
+        "processed": 50,
+        "failed": 0,
+        "duration_s": 5.236,
+        "startTime": "2026-05-20T04:59:43.465Z",
+        "endTime": "2026-05-20T04:59:48.701Z",
+        "before": 8715,
+        "after": 8765,
+        "delta": 50
+      },
+      "speedup": 98.9
+    },
+    "admrul": {
+      "index_name": "admin-appeal-index",
+      "source_label": "행정심판재결례",
+      "docs": 29107,
+      "full_reindex": {
+        "status": "success",
+        "processed": 29108,
+        "failed": 1,
+        "duration_s": 1880.402,
+        "startTime": "2026-05-20T03:44:21.124Z",
+        "endTime": "2026-05-20T04:15:41.526Z",
+        "final_count": 29107
+      },
+      "incremental": {
+        "status": "success",
+        "processed": 50,
+        "failed": 0,
+        "duration_s": 9.619,
+        "startTime": "2026-05-20T04:59:43.58Z",
+        "endTime": "2026-05-20T04:59:53.199Z",
+        "before": 29107,
+        "after": 29157,
+        "delta": 50
+      },
+      "speedup": 195.5
+    }
+  },
+  "full_wall_s": 4491.606071710587,
+  "incr_wall_s": 22.674573183059692
+}
