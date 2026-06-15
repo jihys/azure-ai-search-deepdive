@@ -46,3 +46,6 @@ uv.lock
 data/raw_pdf/
 data/*.jsonl
 func-crawl.zip
+
+# Scratch (local issue tracker)
+.scratch/
