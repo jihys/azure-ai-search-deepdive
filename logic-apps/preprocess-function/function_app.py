@@ -18,7 +18,7 @@ HTTP 트리거 (POST /api/preprocess):
     → ~80 MiB JSONL 파트로 묶기 (AI Search S1 blob limit 128 MiB)
   → processed-documents/{source}/{date}/docs-part-NNN.jsonl
 
-Storage 접근: Managed Identity (VNet Integration → Storage Private Endpoint)
+Storage 접근: Managed Identity (공개 엔드포인트 또는 VNet Integration)
 """
 
 from __future__ import annotations

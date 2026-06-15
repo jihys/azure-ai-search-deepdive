@@ -1,6 +1,6 @@
 // ============================================
 // Azure Function App (Crawler) - Flex Consumption (FC1)
-// Python 3.11 + VNet Integration (snet-func 공유)
+// Python 3.11 (Flex Consumption FC1, 공개 엔드포인트)
 //
 // 역할 (Method B):
 //   Durable Functions Orchestrator + Activity 분할
@@ -14,7 +14,7 @@
 // Flex Consumption (FC1) 사용 이유:
 //   - Y1 Consumption: VNet integration 가능하나 content share 가 SharedKey 강제 →
 //     storage allowSharedKeyAccess=false 환경과 호환 불가
-//   - FC1 (Flex Consumption): identity-based deployment storage + VNet integration 지원
+//   - FC1 (Flex Consumption): identity-based deployment storage 지원
 //     소비량 기반 과금 + 자동 스케일 (Durable Functions fan-out 에 유리)
 // ============================================
 

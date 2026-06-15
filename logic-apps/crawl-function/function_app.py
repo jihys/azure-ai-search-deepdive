@@ -17,7 +17,7 @@ HTTP 트리거: Logic Apps / 수동 POST 호출
   5. 결과 JSON 반환
 
 Storage 접근:
-  - Managed Identity 기반 (VNet Integration → Storage Private Endpoint)
+  - Managed Identity 기반 (공개 엔드포인트 또는 VNet Integration)
 """
 
 import json

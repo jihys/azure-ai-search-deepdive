@@ -1,5 +1,7 @@
 # 인프라 상세 설명
 
+> ℹ️ 이 문서는 `infra/sweden/` (Private 변형) 기준으로 작성되었습니다. `sweden-public` 배포에서는 VNet, Private Endpoints, Shared Private Links, JumpVM이 포함되지 않습니다.
+
 > **리전**: Sweden Central (`swedencentral`) / Korea Central (`koreacentral`)  
 > **Sweden Central**: DI, OpenAI, AI Search 모두 지원하는 단일 리전 배포  
 > **Korea Central**: Document Intelligence가 미지원이므로 East US 2에 별도 배포 + Cross-Region PE  
