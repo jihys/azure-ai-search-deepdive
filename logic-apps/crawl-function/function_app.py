@@ -883,6 +883,7 @@ def crawl_preprocess_orchestrator(context: df.DurableOrchestrationContext):
     # 항상 모든 날짜를 재처리("all")해 raw-documents 전체와 processed-documents 가 일치하도록 보장.
     # (특정 날짜 단일 처리는 cross-date 중복/누락을 야기하므로 사용하지 않음)
     preprocess_summary = None
+    overall_status = "completed"
     if not skip_preprocess:
         pre_tasks = [
             context.call_activity("activity_preprocess_source", {
@@ -895,8 +896,20 @@ def crawl_preprocess_orchestrator(context: df.DurableOrchestrationContext):
         pre_results = yield context.task_all(pre_tasks)
         preprocess_summary = {targets[i]: pre_results[i] for i in range(len(targets))}
 
+        # Check for preprocess failures
+        failed_sources = [
+            s for s, r in preprocess_summary.items()
+            if isinstance(r, dict) and r.get("status") not in ("success", None)
+        ]
+        if failed_sources:
+            overall_status = "completed_with_preprocess_errors"
+            if not context.is_replaying:
+                logging.warning(
+                    f"[orch:{context.instance_id}] preprocess failed for: {failed_sources}"
+                )
+
     return {
-        "status": "completed",
+        "status": overall_status,
         "crawl_date": crawl_date,
         "triggered_by": triggered_by,
         "crawl": crawl_summary,
