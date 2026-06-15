@@ -76,7 +76,7 @@
           "description": "크롤링 Function 호출 - 모든 소스 (prec, detc, expc, admrul) 병렬 처리"
         },
         "runtimeConfiguration": {
-          "timeout": "PT3600S"
+          "timeout": "PT24H"
         }
       },
       "Update_Results_After_Crawl": {
@@ -123,7 +123,7 @@
                   "description": "판례 데이터 청크 생성"
                 },
                 "runtimeConfiguration": {
-                  "timeout": "PT1800S"
+                  "timeout": "PT24H"
                 }
               },
               "Preprocess_Detc": {
@@ -144,7 +144,7 @@
                   "description": "헌재 판례 데이터 청크 생성"
                 },
                 "runtimeConfiguration": {
-                  "timeout": "PT1800S"
+                  "timeout": "PT24H"
                 }
               },
               "Preprocess_Expc": {
@@ -165,7 +165,7 @@
                   "description": "법제처 입법예고 데이터 청크 생성"
                 },
                 "runtimeConfiguration": {
-                  "timeout": "PT1800S"
+                  "timeout": "PT24H"
                 }
               },
               "Preprocess_Admrul": {
@@ -186,7 +186,7 @@
                   "description": "행정심판 판례 데이터 청크 생성"
                 },
                 "runtimeConfiguration": {
-                  "timeout": "PT1800S"
+                  "timeout": "PT24H"
                 }
               }
             },

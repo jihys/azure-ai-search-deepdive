@@ -1,0 +1,10 @@
+.git*
+.vscode/
+__pycache__/
+.python_packages/
+local.settings.json*
+.deploy.zip
+*.pyc
+.env
+tests/
+log.json

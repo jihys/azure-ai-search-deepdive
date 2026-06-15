@@ -5,7 +5,7 @@
 //   1. Daily 06:00 KST 스케줄 (또는 수동 트리거)
 //   2. Start_Orchestration (HTTP POST /api/orchestrators/crawl_preprocess)
 //        → 202 Accepted + statusQueryGetUri (즉시 반환, 타임아웃 무관)
-//   3. Until_Completed (Until loop) — statusQueryGetUri 폴링 (30s 간격, 최대 4시간)
+//   3. Until_Completed (Until loop) — statusQueryGetUri 폴링 (30s 간격, 최대 24시간)
 //        → runtimeStatus in [Completed, Failed, Terminated, Canceled] 시 종료
 //   4. Log_Pipeline_Completion — 최종 output 저장
 //
@@ -37,10 +37,10 @@ param detailWorkers int = 20
 param pollIntervalSeconds int = 30
 
 @description('최대 폴링 대기 시간 (ISO 8601 duration)')
-param pollMaxDuration string = 'PT4H'
+param pollMaxDuration string = 'PT24H'
 
 @description('최대 폴링 횟수 (Until loop 안전 상한)')
-param pollMaxIterations int = 480
+param pollMaxIterations int = 2880
 
 var workflowName = 'logic-crawl-ragi-${take(suffix, 8)}'
 

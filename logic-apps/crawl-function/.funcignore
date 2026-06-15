@@ -1,0 +1,11 @@
+# Exclude from Azure Functions deployment package
+.git*
+.vscode/
+__pycache__/
+.python_packages/
+local.settings.json
+local.settings.json.example
+.deploy.zip
+*.pyc
+.env
+tests/
