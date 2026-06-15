@@ -649,7 +649,7 @@ uv run python scripts/setup_ai_search_multimodal_pipeline.py --source {source} -
    │
 6. Private Endpoints (모든 서비스 ID 참조)
    │
-7. [코드 배포] logic-apps/crawl-function/ → Function App (섹션 8)
+7. [코드 배포] 3개 Function App 각각에 올바른 소스 배포 (섹션 9)
    │
 8. [수동] Shared Private Link 승인 (섹션 10)
    │
@@ -743,48 +743,71 @@ az deployment sub create \
 
 ## 9. Function App 코드 배포
 
-Bicep으로 Function App 인프라를 배포한 후, 크롤러 + 스킬 코드(`logic-apps/crawl-function/`)를 Function App에 배포합니다.
+Bicep으로 Function App 인프라를 배포한 후, 3개 Function App에 각각 올바른 소스 코드를 배포합니다.
+
+| Function App | 소스 디렉토리 | 주요 함수 |
+|---|---|---|
+| `func-crawl-cons-ragi-<suffix>` | `logic-apps/crawl-function/` | crawl, crawl_preprocess_orchestrator |
+| `func-preprocess-ragi-<suffix>` | `logic-apps/preprocess-function/` | preprocess |
+| `func-skills-ragi-<suffix>` | `skills-function/` | markdown_split, pptx_page_split, verbalize |
+
+> ⚠️ **주의**: 반드시 각 Function App에 해당하는 소스 디렉토리에서 배포해야 합니다. 잘못된 디렉토리에서 배포하면 함수가 덮어씌워집니다.
 
 ### Azure Functions Core Tools 사용
 
 ```bash
+# 1. Crawl Function
 cd logic-apps/crawl-function
-func azure functionapp publish func-crawl-ragi-<suffix> --python
+func azure functionapp publish func-crawl-cons-ragi-<suffix> --python
+
+# 2. Preprocess Function
+cd logic-apps/preprocess-function
+func azure functionapp publish func-preprocess-ragi-<suffix> --python
+
+# 3. Skills Function
+cd skills-function
+func azure functionapp publish func-skills-ragi-<suffix> --python
 ```
 
 ### Azure CLI ZIP 배포 사용
 
 ```bash
+# 1. Crawl Function
 cd logic-apps/crawl-function
-zip -r ../func-crawl.zip .
-
-# Sweden
+zip -r /tmp/func-crawl.zip . -x ".python_packages/*"
 az functionapp deployment source config-zip \
-    --name func-crawl-ragi-<suffix> \
-    --resource-group rg-rag-indexing-lab-swc \
-    --src ../func-crawl.zip
+    --name func-crawl-cons-ragi-<suffix> \
+    --resource-group rg-rag-indexing-lab-swc-pub \
+    --src /tmp/func-crawl.zip --build-remote true
 
-# Korea
+# 2. Preprocess Function
+cd logic-apps/preprocess-function
+zip -r /tmp/func-preprocess.zip . -x ".python_packages/*"
 az functionapp deployment source config-zip \
-    --name func-crawl-ragi-<suffix> \
-    --resource-group rg-rag-indexing-lab-krc \
-    --src ../func-crawl.zip
+    --name func-preprocess-ragi-<suffix> \
+    --resource-group rg-rag-indexing-lab-swc-pub \
+    --src /tmp/func-preprocess.zip --build-remote true
+
+# 3. Skills Function
+cd skills-function
+zip -r /tmp/func-skills.zip . -x ".python_packages/*"
+az functionapp deployment source config-zip \
+    --name func-skills-ragi-<suffix> \
+    --resource-group rg-rag-indexing-lab-swc-pub \
+    --src /tmp/func-skills.zip --build-remote true
 ```
 
 ### 배포 확인
 
 ```bash
-# Function 목록 확인
-az functionapp function list \
-    --name func-crawl-ragi-<suffix> \
-    --resource-group rg-rag-indexing-lab-swc \
-    --query "[].{name:name, invokeUrlTemplate:invokeUrlTemplate}" \
-    --output table
-
-# 수동 테스트 (즉시 크롤 실행)
-curl -X POST "https://func-crawl-ragi-<suffix>.azurewebsites.net/api/crawl" \
-    -H "Content-Type: application/json" \
-    -d '{"limit": 3, "triggered_by": "manual-test"}'
+# 각 Function App에 올바른 함수가 배포되었는지 확인
+for app in func-crawl-cons-ragi-<suffix> func-preprocess-ragi-<suffix> func-skills-ragi-<suffix>; do
+  echo "=== $app ==="
+  az functionapp function list \
+      --name "$app" \
+      --resource-group rg-rag-indexing-lab-swc-pub \
+      --query "[].name" -o tsv
+done
 ```
 
 ---
