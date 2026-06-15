@@ -47,5 +47,8 @@ data/raw_pdf/
 data/*.jsonl
 func-crawl.zip
 
+# Bicep build artifacts
+infra/**/main.json
+
 # Scratch (local issue tracker)
 .scratch/
