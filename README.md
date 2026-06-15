@@ -4,8 +4,8 @@
 
 | 시나리오 | 데이터 | 파이프라인 | 인덱스 |
 |----------|------|---------|--------|
-| **A. 법령 문서** | 한국 법령 (law.go.kr 크롤링) | Logic Apps 오케스트레이션 → AI Search Native Skillset | 4개 (prec / detc / expc / admrul) |
-| **B. 멀티모달** | PDF / PPTX (수동 업로드) | AI Search Skillset 비교 (Native vs Custom+Native) | 2개 (비교용) |
+| **A. 법령 문서** | 한국 법령 (law.go.kr 크롤링) | Logic Apps 오케스트레이션 → AI Search Native Skillset | 4개 (prec-court / const-court / legis-interp / admin-appeal) |
+| **B. 멀티모달** | PDF / PPTX (수동 업로드) | AI Search Skillset 비교 (Basic vs Verbalized) | 3개 (basic-pdf / basic-pptx / verbalized) |
 
 모든 Azure 리소스는 **Private Network (VNet + Private Endpoints)** 내에 구성됩니다.
 
@@ -120,8 +120,8 @@ sudo apt-get update && sudo apt-get install -y azure-functions-core-tools-4
 ### 1. 환경 설정
 
 ```bash
-git clone https://github.com/jihys/azure-rag-indexing-lab.git
-cd azure-rag-indexing-lab
+git clone https://github.com/jihys/azure-ai-search-deepdive.git
+cd azure-ai-search-deepdive
 
 uv venv .venv --python 3.10
 source .venv/bin/activate
@@ -185,34 +185,37 @@ uv run python logic-apps/deploy_workflow.py
 ### 5. AI Search 파이프라인 설정
 
 **시나리오 A — 법령 텍스트 (4개 인덱스)**:
-```bash
-# Index + Skillset(Text Split + Embedding) + DataSource + Indexer 생성
-uv run python scripts/setup_ai_search_pipeline.py
 
-# 즉시 첫 인덱싱 실행 (Full Build)
-uv run python scripts/setup_ai_search_pipeline.py --run
-```
+Notebook `03-indexing.ipynb`에서 `src.pipeline.legal_pipeline`을 사용하여 설정합니다:
+- Index (4개) + Native Skillset (SplitSkill + EmbeddingSkill) + DataSource + Indexer
+- 캐시 활성화: `enable_cache=True` 옵션으로 Incremental Enrichment Cache 사용
 
-**시나리오 B — 멀티모달 (2개 인덱스, 비교용)**:
-```bash
-# PDF/PPTX를 Blob에 수동 업로드
-uv run python scripts/prepare_multimodal_raw_dataset.py --source {source}
+**시나리오 B — 멀티모달 (3개 파이프라인, 비교용)**:
 
-# Pipeline B-1: Native-only Skillset (DI Layout → Text Split → Embedding)
-# Pipeline B-2: Custom+Native Skillset (DI Layout → GPT-5.4 Verbalization → Split → Embedding)
-uv run python scripts/setup_ai_search_multimodal_pipeline.py --source {source} --run-indexer
-```
+Notebook `05-multimodal-indexing.ipynb`에서 `src.pipeline.multimodal_pipeline`을 사용합니다:
 
-### 6. 데이터 크롤링 (선택 사항)
+- **Pipeline B-1 (Basic PDF)**: DI Layout → Custom `markdown_split` → Embedding
+- **Pipeline B-2 (Basic PPTX)**: DI Layout → Custom `pptx_page_split` → Embedding
+- **Pipeline B-3 (Verbalized)**: DI Layout → Custom `verbalize` (GPT-5.4 Vision) → Custom `markdown_split` → Embedding
 
-Logic App 스케줄이 아닌 수동으로 크롤링하려면:
+### 5-1. Custom AI Search Skills
 
-```bash
-# 법령 데이터 수집 및 Blob 업로드 (단일 실행)
-uv run python -m src.crawler.law_crawler
-```
+`skills-function/function_app.py`에 구현된 3개 Custom Web API Skill:
 
-### 7. 노트북 실행
+| Skill | Route | 용도 |
+|-------|-------|------|
+| `markdown_split` | `/api/markdown_split` | Markdown 헤더 기반 텍스트 분할 (2000자 / 200자 overlap) |
+| `pptx_page_split` | `/api/pptx_page_split` | `<!-- PageBreak -->` 마커 기반 슬라이드 분할 |
+| `verbalize` | `/api/verbalize` | GPT-5.4 Vision으로 이미지/차트를 텍스트 설명으로 변환 |
+
+### 5-2. Incremental Enrichment Cache
+
+초기 테스트 시 캐시 비활성화 → 이후 `enable_cache=True`로 활성화:
+- 변경된 문서만 재처리하여 스킬 실행 비용 절감
+- Azure Storage Resource ID를 캐시 백엔드로 사용
+- `enableReprocessing: True` 설정으로 캐시된 문서도 재보강 가능
+
+### 6. 노트북 실행
 
 #### 공통 준비 (시나리오 A·B 공통)
 | 순서 | 노트북 | 설명 |
@@ -223,75 +226,55 @@ uv run python -m src.crawler.law_crawler
 | 순서 | 노트북 | 설명 |
 |------|--------|------|
 | 2 | `notebooks/02-data-crawling.ipynb` | Logic App 트리거 + AI Search 인덱서 모니터링 + Blob 결과 검증 |
-| 3 | `notebooks/03-indexing.ipynb` | 인덱싱 샘플 실행 및 필요 시 전체 인덱스 삭제 후 인덱서 재실행 |
-| 4 | `notebooks/04-search-and-query.ipynb` | AI Search 하이브리드 검색 + GPT-5.4 RAG 질의응답 |
-| 5 | `notebooks/05-multi-index-search.ipynb` | 멀티 인덱스 통합 검색 및 Cross-Index RAG |
+| 3 | `notebooks/03-indexing.ipynb` | 4개 인덱스 스키마 생성 + Skillset/Indexer 설정 + Cache 활성화 테스트 |
+| 4 | `notebooks/04-search-and-query.ipynb` | Hybrid/Semantic/RAG 검색 + Multi-Index 검색 + Agentic Retrieval |
 
 #### 시나리오 B: 멀티모달 PDF/PPTX 인덱싱
 | 순서 | 노트북 | 설명 |
 |------|--------|------|
-| 6 | `notebooks/06-multimodal-search.ipynb` | PDF 업로드 → Native vs Custom+Native Skillset 비교 → 멀티모달 검색 데모 |
+| 5 | `notebooks/05-multimodal-indexing.ipynb` | PDF/PPTX 업로드 + Basic/Verbalized 3개 파이프라인 실행 |
+| 6 | `notebooks/06-multimodal-search.ipynb` | Basic vs Verbalized 검색 품질 비교 + 이미지 검색 데모 |
 
 ## 프로젝트 구조
 
 ```
-azure-rag-indexing-lab/
-├── infra/                           # Bicep 인프라 템플릿 (리전별 분리)
-│   ├── sweden/                      # Sweden Central 배포
-│   │   ├── main.bicep               # 메인 (Sweden Central, Private Network)
-│   │   ├── modules/
-│   │   │   ├── vnet.bicep            # VNet + Private DNS Zones
-│   │   │   ├── private-endpoints.bicep # 모든 서비스 Private Endpoints
-│   │   │   ├── storage.bicep         # Storage Account (Private)
-│   │   │   ├── openai.bicep          # AI Services (Private)
-│   │   │   ├── ai-search.bicep       # AI Search + Shared Private Links
-│   │   │   └── doc-intelligence.bicep # Document Intelligence (Private)
-│   │   └── parameters/
-│   │       └── main.bicepparam       # Sweden Central 파라미터
-│   │
-│   └── korea/                       # Korea Central 배포
-│       ├── main.bicep               # 메인 (Korea Central + East US 2 DI)
-│       ├── modules/
-│       │   ├── vnet.bicep            # VNet + Private DNS Zones
-│       │   ├── private-endpoints.bicep # PE (Cross-Region DI PE 포함)
-│       │   ├── storage.bicep         # Storage Account (Private)
-│       │   ├── openai.bicep          # AI Services (Private)
-│       │   ├── ai-search.bicep       # AI Search + Shared Private Links
-│       │   └── doc-intelligence.bicep # Document Intelligence (East US 2)
-│       └── parameters/
-│           └── main.bicepparam       # Korea Central 파라미터
+azure-ai-search-deepdive/
+├── src/                             # Python 소스 코드
+│   ├── pipeline/
+│   │   ├── legal_pipeline.py        # 4 법률 인덱서 + Skillset + Cache 설정
+│   │   ├── multimodal_pipeline.py   # 3 멀티모달 파이프라인 (basic PDF/PPTX + verbalized)
+│   │   └── indexer_ops.py           # AI Search REST API 클라이언트
+│   └── search/
+│       ├── legal_indexes.py         # 4 법률 인덱스 스키마 (HNSW 3072D, ko.microsoft)
+│       └── multimodal_index.py      # 멀티모달 인덱스 스키마 (text+image 벡터)
 │
-├── scripts/
-│   ├── setup_ai_search_pipeline.py             # 기존 법령 텍스트 인덱서/스킬셋 설정
-│   ├── prepare_multimodal_raw_dataset.py       # raw_pdf ZIP 해제/분류/업로드
-│   └── setup_ai_search_multimodal_pipeline.py  # 별도 멀티모달 인덱스 파이프라인 설정
+├── skills-function/                 # Custom AI Search Skills (Azure Function)
+│   └── function_app.py              # 3 skills: markdown_split, pptx_page_split, verbalize
 │
 ├── logic-apps/
-│   ├── deploy_workflow.py                      # Logic Apps 워크플로우 배포 스크립트
-│   ├── crawl-function/                         # Crawl Function 코드
-│   ├── preprocess-function/                    # Data Integration Function 코드
-│   ├── crawl-preprocess-workflow/              # 운영 워크플로우 (기본)
-│   ├── crawl-workflow/                         # 레거시/디버그용
-│   └── rag-indexing-workflow/                  # 레거시/디버그용
+│   ├── deploy_workflow.py           # Logic Apps 워크플로우 배포 (Kudu API)
+│   ├── crawl-function/              # law.go.kr 크롤러 (Azure Function)
+│   ├── preprocess-function/         # 메타데이터 정규화 (Azure Function)
+│   └── crawl-preprocess-workflow/   # 운영 워크플로우 (매일 06:00 KST)
 │
-├── docs/
-│   ├── infrastructure.md            # 인프라 상세 설명  [NEW]
+├── notebooks/                       # Step-by-Step 핸즈온 랩
+│   ├── 01-infra-deployment.ipynb    # Bicep 배포 + Function 배포 + SPL 승인
+│   ├── 02-data-crawling.ipynb       # Logic App 트리거 + 크롤링 검증
+│   ├── 03-indexing.ipynb            # 인덱스/Skillset/Indexer 생성 + Cache 테스트
+│   ├── 04-search-and-query.ipynb    # Hybrid/Semantic/RAG + Agentic Retrieval
+│   ├── 05-multimodal-indexing.ipynb # Basic/Verbalized 파이프라인 실행
+│   └── 06-multimodal-search.ipynb   # 검색 품질 비교
+│
+├── infra/                           # Bicep 인프라 템플릿 (리전별 분리)
+│   ├── sweden/                      # 메인 배포 (Private Network)
+│   ├── sweden-public/               # 퍼블릭 변형
+│   └── korea/                       # Korea Central 변형
+│
+├── docs/                            # 아키텍처 다이어그램, ADR, 리포트
+│   ├── infrastructure.md            # 인프라 상세 설명
 │   ├── architecture-sweden.drawio   # Sweden 아키텍처 다이어그램
-│   └── architecture-korea.drawio    # Korea 아키텍처 다이어그램
-│
-├── src/                             # Python 소스 코드
-│   ├── crawler/law_crawler.py       # 법령 크롤러 (law.go.kr)
-│   ├── blob/uploader.py             # Blob Storage 업로더
-│   ├── preprocessing/               # Document Intelligence, Embedding
-│   └── search/                      # AI Search 인덱스 관리
-│
-├── notebooks/                       # Step-by-Step 노트북
-│   ├── 01-infra-deployment.ipynb
-│   ├── 02-data-crawling.ipynb
-│   ├── 03-indexing.ipynb
-│   ├── 04-search-and-query.ipynb
-│   ├── 05-multi-index-search.ipynb
-│   └── 06-multimodal-search.ipynb
+│   ├── issues/                      # ADR 스타일 의사결정
+│   └── reports/                     # 실험 결과, 캐시 분석
 │
 └── data/
     ├── raw/                         # 크롤링 원본 (날짜별)
