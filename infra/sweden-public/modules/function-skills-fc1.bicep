@@ -17,9 +17,6 @@ param location string
 @description('리소스 이름 접미사')
 param suffix string
 
-@description('Function App VNet integration 서브넷 ID')
-param funcSubnetId string
-
 @description('Storage Account 이름 (Functions runtime 용)')
 param storageAccountName string
 
@@ -98,8 +95,6 @@ resource funcApp 'Microsoft.Web/sites@2024-04-01' = {
   properties: {
     serverFarmId: funcPlan.id
     httpsOnly: true
-    virtualNetworkSubnetId: funcSubnetId
-    vnetRouteAllEnabled: true
     publicNetworkAccess: 'Enabled'
     functionAppConfig: {
       deployment: {

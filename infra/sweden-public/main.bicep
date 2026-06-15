@@ -4,7 +4,7 @@
 // Network: All resources publicly reachable (workshop / lab)
 //          - No Private Endpoints
 //          - No JumpVM
-//          - VNet kept only for Function App egress (FC1/EP1)
+//          - No VNet
 // ============================================
 
 targetScope = 'subscription'
@@ -58,18 +58,6 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
     environment: 'lab'
     region: 'swedencentral'
     networking: 'public'
-  }
-}
-
-// ============================================
-// Virtual Network + Private DNS Zones
-// ============================================
-module vnet 'modules/vnet.bicep' = {
-  scope: rg
-  name: 'vnet-deployment-${take(suffix, 8)}'
-  params: {
-    location: location
-    suffix: suffix
   }
 }
 
@@ -155,7 +143,6 @@ module functionPreprocess 'modules/function-preprocess-fc1.bicep' = {
   params: {
     location: location
     suffix: suffix
-    funcSubnetId: vnet.outputs.funcFc1SubnetId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     rawContainerName: blobContainerName
@@ -166,7 +153,7 @@ module functionPreprocess 'modules/function-preprocess-fc1.bicep' = {
 // ============================================
 // Azure Function App (Crawler, Flex Consumption FC1)
 // Method B: Durable Functions + Activity 분할
-//   - identity-based deployment storage + VNet integration
+//   - identity-based deployment storage
 // ============================================
 module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' = {
   scope: rg
@@ -174,7 +161,6 @@ module functionCrawlerConsumption 'modules/function-crawler-consumption.bicep' =
   params: {
     location: location
     suffix: suffix
-    funcSubnetId: vnet.outputs.funcFc1SubnetId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     blobContainerName: blobContainerName
@@ -193,7 +179,6 @@ module functionSkills 'modules/function-skills-fc1.bicep' = {
   params: {
     location: location
     suffix: suffix
-    funcSubnetId: vnet.outputs.funcFc1SubnetId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     aiServicesAccountId: openai.outputs.accountId
@@ -221,29 +206,7 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
 }
 
 // ============================================
-// Azure AI Foundry Hub + Project (Private AI Search 연결)
-// Managed Network: AllowInternetOutbound
-// Outbound PE: AI Search + AI Services
-// ============================================
-module foundryHub 'modules/foundry-hub.bicep' = {
-  scope: rg
-  name: 'foundry-hub-deployment-${take(suffix, 8)}'
-  params: {
-    location: location
-    suffix: suffix
-    storageAccountId: storage.outputs.storageAccountId
-    storageAccountName: storage.outputs.storageAccountName
-    searchServiceId: aiSearch.outputs.searchServiceId
-    searchServiceName: aiSearch.outputs.searchServiceName
-    searchEndpoint: aiSearch.outputs.endpoint
-    aiServicesId: openai.outputs.accountId
-    aiServicesName: openai.outputs.accountName
-    aiServicesEndpoint: openai.outputs.endpoint
-  }
-}
-
-// ============================================
-// (PUBLIC variant) No Private Endpoints / No JumpVM
+// (PUBLIC variant) No Private Endpoints / No JumpVM / No Foundry Hub
 // All services are reachable directly via their public endpoints.
 // ============================================
 
@@ -252,7 +215,6 @@ module foundryHub 'modules/foundry-hub.bicep' = {
 // ============================================
 output resourceGroupName string = rg.name
 output location string = location
-output vnetName string = vnet.outputs.vnetName
 output storageAccountName string = storage.outputs.storageAccountName
 output storageAccountBlobEndpoint string = storage.outputs.blobEndpoint
 output openaiEndpoint string = openai.outputs.endpoint
@@ -270,7 +232,4 @@ output skillsFunctionName string = functionSkills.outputs.funcAppName
 output crawlConsFunctionName string = functionCrawlerConsumption.outputs.funcAppName
 output skillsFunctionUrl string = functionSkills.outputs.skillsFunctionUrl
 output crawlLogicAppName string = logicAppCrawl.outputs.crawlWorkflowName
-output foundryHubName string = foundryHub.outputs.hubName
-output foundryProjectName string = foundryHub.outputs.projectName
 output foundryProjectEndpoint string = openai.outputs.foundryProjectEndpoint
-output foundryKeyVaultName string = foundryHub.outputs.keyVaultName

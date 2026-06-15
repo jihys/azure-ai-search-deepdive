@@ -8,7 +8,7 @@
 //   → date 필드 정규화 + 80 MiB JSONL 파트로 묶기
 //   → processed-documents/{source}/{date}/docs-part-NNN.jsonl
 //
-// Storage 접근: Managed Identity (VNet Integration)
+// Storage 접근: Managed Identity
 // ============================================
 
 @description('배포 리전 (Flex Consumption 지원 리전이어야 함)')
@@ -16,9 +16,6 @@ param location string
 
 @description('리소스 이름 접미사')
 param suffix string
-
-@description('Function App VNet integration 서브넷 ID')
-param funcSubnetId string
 
 @description('Storage Account 이름')
 param storageAccountName string
@@ -91,8 +88,6 @@ resource funcApp 'Microsoft.Web/sites@2024-04-01' = {
   properties: {
     serverFarmId: funcPlan.id
     httpsOnly: true
-    virtualNetworkSubnetId: funcSubnetId
-    vnetRouteAllEnabled: true
     publicNetworkAccess: 'Enabled'
     functionAppConfig: {
       deployment: {
