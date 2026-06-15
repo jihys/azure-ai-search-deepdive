@@ -7,7 +7,8 @@
 | **A. 법령 문서** | 한국 법령 (law.go.kr 크롤링) | Logic Apps 오케스트레이션 → AI Search Native Skillset | 4개 (prec-court / const-court / legis-interp / admin-appeal) |
 | **B. 멀티모달** | PDF / PPTX (수동 업로드) | AI Search Skillset 비교 (Basic vs Verbalized) | 3개 (basic-pdf / basic-pptx / verbalized) |
 
-모든 Azure 리소스는 **Private Network (VNet + Private Endpoints)** 내에 구성됩니다.
+> **권장 배포**: `infra/sweden-public/` — 모든 리소스가 공개 엔드포인트로 접근 가능 (실습/워크샵용)
+> **프로덕션 변형**: `infra/sweden/` — VNet + Private Endpoints 기반 (보안 강화)
 
 > **리전**: Sweden Central — Document Intelligence가 Korea Central 미지원이므로 Sweden Central 사용
 
@@ -78,22 +79,19 @@
 
 ## 배포되는 Azure 리소스
 
-| 리소스 | 리전 | SKU | 공개 접근 |
-|--------|------|-----|-----------|
-| Resource Group | Sweden Central | - | - |
-| Virtual Network (10.0.0.0/16) | Sweden Central | - | - |
-| Storage Account | Sweden Central | Standard LRS | **차단** |
-| Azure AI Services (gpt-5.4 + embedding) | Sweden Central | S0 | **차단** |
-| Document Intelligence | Sweden Central | S0 | **차단** |
-| Azure AI Search | Sweden Central | **Standard (S1)** | **차단** |
-| Function App (Crawl) | Sweden Central | EP1 | 인바운드 공개 |
-| Function App (Preprocess) | Sweden Central | EP1 | VNet 내부 |
-| Logic App (Standard) | Sweden Central | WS1 | - |
-| Private Endpoints × 4 | Sweden Central | - | VNet 내부만 |
-| Private DNS Zones × 4 | Global | - | VNet 연결 |
-| Shared Private Links × 3 | - | - | Search 아웃바운드 |
+| 리소스 | 리전 | SKU | 비고 |
+|--------|------|-----|------|
+| Resource Group | Sweden Central | - | `rg-rag-indexing-lab-swc-pub` |
+| Storage Account | Sweden Central | Standard LRS | Managed Identity 인증 (`allowSharedKeyAccess=false`) |
+| Azure AI Services (gpt-5.4 + embedding) | Sweden Central | S0 | Foundry Agent Service 포함 |
+| Document Intelligence | Sweden Central | S0 | PDF/PPTX Layout 분석 |
+| Azure AI Search | Sweden Central | **Standard (S1)** | Hybrid + Semantic Ranker |
+| Function App (Crawl) | Sweden Central | FC1 (Flex Consumption) | Durable Functions orchestrator |
+| Function App (Preprocess) | Sweden Central | FC1 (Flex Consumption) | JSON → JSONL 정규화 |
+| Function App (Skills) | Sweden Central | FC1 (Flex Consumption) | Custom AI Search Skills |
+| Logic App | Sweden Central | Consumption | 매일 06:00 KST 크롤링 스케줄러 |
 
-> 상세 설명: [docs/infrastructure.md](docs/infrastructure.md)
+> **Private 변형** (`infra/sweden/`): 위 리소스에 VNet, Private Endpoints × 4, Private DNS Zones × 4, Shared Private Links × 3, JumpVM이 추가됩니다. 상세: [docs/infrastructure.md](docs/infrastructure.md)
 
 ## 사전 요구사항
 
@@ -136,14 +134,22 @@ cp sample.env .env
 ```bash
 az login
 
-# Sweden Central에 배포 (~10분 소요)
+# sweden-public 배포 (권장 — 공개 엔드포인트, VNet 없음)
 az deployment sub create \
     --location swedencentral \
-    --template-file infra/sweden/main.bicep \
-    --parameters infra/sweden/parameters/main.bicepparam
+    --template-file infra/sweden-public/main.bicep \
+    --parameters infra/sweden-public/parameters/main.bicepparam
+
+# sweden 배포 (Private Network — VNet + PE)
+# az deployment sub create \
+#     --location swedencentral \
+#     --template-file infra/sweden/main.bicep \
+#     --parameters infra/sweden/parameters/main.bicepparam
 ```
 
 ### 3. Shared Private Link 승인
+
+> ⚠️ **sweden-public 배포 시 이 단계를 건너뛸 수 있습니다.** Shared Private Link는 private 변형(`infra/sweden/`)에서만 필요합니다.
 
 Bicep 배포 후 AI Search의 아웃바운드 Private Link 연결을 승인합니다.
 
@@ -297,7 +303,19 @@ azure-ai-search-deepdive/
 2. `crawl-workflow`, `rag-indexing-workflow`는 레거시/디버그용으로 저장소에만 유지
 3. Split/Embedding/Ingest는 AI Search 네이티브 Skillset이 담당
 
+### v2.1 (2026-06-15)
+
+| 변경 항목 | 이전 | 이후 |
+|----------|------|------|
+| 권장 배포 | sweden (Private) | **sweden-public** (공개 엔드포인트) |
+| Function App | EP1 (Elastic Premium) | **FC1** (Flex Consumption, 사용량 기반 과금) |
+| 네트워크 | VNet + PE 필수 | **공개 엔드포인트** (sweden-public), VNet+PE 선택 (sweden) |
+| Foundry Hub | Hub + Project + KeyVault 별도 배포 | **AI Services 하위 프로젝트** (Hub 불필요) |
+| 폴링 타임아웃 | PT4H (4시간) | **PT24H** (24시간) |
+
 ## Private Network 접근 방법
+
+> ℹ️ 이 섹션은 `infra/sweden/` (Private 변형) 배포 시에만 해당됩니다. `sweden-public` 배포 시에는 모든 서비스가 공개 엔드포인트로 직접 접근 가능합니다.
 
 모든 서비스가 Private Endpoint 전용이므로 개발자 접근 방법:
 
