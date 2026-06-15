@@ -1,10 +1,13 @@
 """
 멀티모달(PDF/PPTX) AI Search 인덱싱 파이프라인 설정.
 
-3개 파이프라인:
-  - PDF basic     : DI Layout → Custom markdown_split → Embedding
-  - PPTX basic    : DI Layout → Custom pptx_page_split → Embedding
-  - Verbalized    : DI Layout → GPT-5.4 Verbalize → Custom markdown_split → Embedding
+파이프라인 구성:
+  B-1 Basic PDF           : DI Layout → Custom markdown_split → Embedding
+  B-2 Basic PPTX          : DI Layout → Custom pptx_page_split → Embedding
+  B-3 Verbalized PDF      : DI Layout → GPT-5.4 Verbalize → Custom markdown_split → Embedding
+  B-4 Verbalized PPTX     : DI Layout → GPT-5.4 Verbalize → Custom markdown_split → Embedding
+
+리소스 네이밍: multimodal-{type}-{resource}-{format} (prefix-free)
 """
 
 from __future__ import annotations
@@ -333,8 +336,8 @@ def setup_multimodal_pipeline(
     """멀티모달 인덱싱 파이프라인 생성 (및 선택적 실행).
 
     Args:
-        source: Blob prefix 세그먼트 (기본: 'st')
-        pipeline: 'all', 'pdf', 'pptx', 'verbalized', 'basic', 'both'
+        source: (deprecated) 리소스 이름에 사용하지 않음. 하위 호환용 유지
+        pipeline: 'all', 'pdf', 'pptx', 'verbalized', 'verbalized-pptx', 'basic', 'both'
         run: True이면 생성 후 인덱서 즉시 실행 + 폴링
         schedule: 인덱서 스케줄 (ISO 8601). 'none'이면 수동
         start_time: 스케줄 시작 시간 (UTC)
@@ -355,39 +358,51 @@ def setup_multimodal_pipeline(
     skills_function_key = _env("SKILLS_FUNCTION_KEY")
     ai_services_subdomain = _env("AZURE_AI_SERVICES_ENDPOINT")
     container = container or _env("AZURE_STORAGE_CONTAINER_NAME", default="raw-documents")
-    prefix = prefix if prefix is not None else "raw/"
+    base_prefix = prefix if prefix is not None else "raw/"
+    if not base_prefix.endswith("/"):
+        base_prefix += "/"
 
     want_pdf = pipeline in ("all", "both", "basic", "pdf")
     want_pptx = pipeline in ("all", "both", "basic", "pptx")
     want_verbalized = pipeline in ("all", "verbalized")
+    want_verbalized_pptx = pipeline in ("all", "verbalized", "verbalized-pptx")
 
-    # 리소스 이름
-    pdf_index = f"{source}-multimodal-pdf-index"
-    pdf_skillset = f"{source}-multimodal-pdf-skillset"
-    pdf_indexer = f"{source}-multimodal-pdf-indexer"
-    pptx_index = f"{source}-multimodal-pptx-index"
-    pptx_skillset = f"{source}-multimodal-pptx-skillset"
-    pptx_indexer = f"{source}-multimodal-pptx-indexer"
-    verbalized_index = f"{source}-multimodal-verbalized-index"
-    verbalized_skillset = f"{source}-multimodal-verbalized-skillset"
-    verbalized_indexer = f"{source}-multimodal-verbalized-indexer"
-    datasource_name = f"{source}-raw-datasource"
+    # 리소스 이름 (prefix-free 고정 네이밍)
+    pdf_index = "multimodal-basic-index-pdf"
+    pdf_skillset = "multimodal-basic-skillset-pdf"
+    pdf_indexer = "multimodal-basic-indexer-pdf"
+    pptx_index = "multimodal-basic-index-pptx"
+    pptx_skillset = "multimodal-basic-skillset-pptx"
+    pptx_indexer = "multimodal-basic-indexer-pptx"
+    verbalized_index = "multimodal-verbalized-index-pdf"
+    verbalized_skillset = "multimodal-verbalized-skillset-pdf"
+    verbalized_indexer = "multimodal-verbalized-indexer-pdf"
+    verbalized_pptx_index = "multimodal-verbalized-index-pptx"
+    verbalized_pptx_skillset = "multimodal-verbalized-skillset-pptx"
+    verbalized_pptx_indexer = "multimodal-verbalized-indexer-pptx"
+    datasource_pdf = "multimodal-datasource-pdf"
+    datasource_pptx = "multimodal-datasource-pptx"
 
     print("=" * 60)
     print("AI Search 멀티모달 파이프라인 설정")
-    print(f"  pipeline: {pipeline}  (pdf={want_pdf}, pptx={want_pptx}, verbalized={want_verbalized})")
-    print(f"  container: {container}/{prefix}")
+    print(f"  pipeline: {pipeline}  (pdf={want_pdf}, pptx={want_pptx}, verbalized={want_verbalized}, verbalized_pptx={want_verbalized_pptx})")
+    print(f"  container: {container}/{base_prefix}")
     print(f"  schedule: {schedule}")
     print("=" * 60)
 
     # 사전 정리
     print("\n[0] Cleanup dependent indexers")
-    for idxr in (pdf_indexer, pptx_indexer, verbalized_indexer):
+    for idxr in (pdf_indexer, pptx_indexer, verbalized_indexer, verbalized_pptx_indexer):
         client.delete_if_exists(f"/indexers/{idxr}")
 
-    # 공유 데이터소스
-    print("\n[1] Data Source")
-    _create_datasource(client, datasource_name, container, prefix, storage_resource_id)
+    # 데이터소스 (PDF / PPTX 분리)
+    pdf_ds_prefix = base_prefix + "pdf/"
+    pptx_ds_prefix = base_prefix + "pptx/"
+    print("\n[1] Data Sources")
+    if want_pdf or want_verbalized:
+        _create_datasource(client, datasource_pdf, container, pdf_ds_prefix, storage_resource_id)
+    if want_pptx or want_verbalized_pptx:
+        _create_datasource(client, datasource_pptx, container, pptx_ds_prefix, storage_resource_id)
 
     if want_pdf:
         print(f"\n[2A] Pipeline PDF")
@@ -398,7 +413,7 @@ def setup_multimodal_pipeline(
             skills_function_url, skills_function_key, ai_services_subdomain,
         )
         _create_indexer(
-            client, pdf_indexer, datasource_name, pdf_index, pdf_skillset,
+            client, pdf_indexer, datasource_pdf, pdf_index, pdf_skillset,
             schedule, start_time, indexed_extensions=".pdf", enable_cache=enable_cache,
         )
         if run:
@@ -414,7 +429,7 @@ def setup_multimodal_pipeline(
             skills_function_url, skills_function_key, ai_services_subdomain,
         )
         _create_indexer(
-            client, pptx_indexer, datasource_name, pptx_index, pptx_skillset,
+            client, pptx_indexer, datasource_pptx, pptx_index, pptx_skillset,
             schedule, start_time, indexed_extensions=".pptx", enable_cache=enable_cache,
         )
         if run:
@@ -422,7 +437,7 @@ def setup_multimodal_pipeline(
             poll_indexer(client, pptx_indexer, timeout_sec=1200)
 
     if want_verbalized:
-        print(f"\n[2C] Pipeline Verbalized")
+        print(f"\n[2C] Pipeline Verbalized PDF")
         _create_index(client, verbalized_index, dimensions)
         _create_verbalized_skillset(
             client, verbalized_skillset, verbalized_index,
@@ -431,12 +446,29 @@ def setup_multimodal_pipeline(
         )
         verb_start = start_time.replace("T07:00:", "T07:30:") if "T07:00:" in start_time else start_time
         _create_indexer(
-            client, verbalized_indexer, datasource_name, verbalized_index, verbalized_skillset,
+            client, verbalized_indexer, datasource_pdf, verbalized_index, verbalized_skillset,
             schedule, verb_start, indexed_extensions=".pdf", enable_cache=enable_cache,
         )
         if run:
             run_indexer(client, verbalized_indexer)
             poll_indexer(client, verbalized_indexer, timeout_sec=1200)
+
+    if want_verbalized_pptx:
+        print(f"\n[2D] Pipeline Verbalized PPTX")
+        _create_index(client, verbalized_pptx_index, dimensions)
+        _create_verbalized_skillset(
+            client, verbalized_pptx_skillset, verbalized_pptx_index,
+            openai_endpoint, embedding_deployment, dimensions,
+            skills_function_url, skills_function_key, ai_services_subdomain,
+        )
+        verb_pptx_start = start_time.replace("T07:00:", "T08:00:") if "T07:00:" in start_time else start_time
+        _create_indexer(
+            client, verbalized_pptx_indexer, datasource_pptx, verbalized_pptx_index, verbalized_pptx_skillset,
+            schedule, verb_pptx_start, indexed_extensions=".pptx", enable_cache=enable_cache,
+        )
+        if run:
+            run_indexer(client, verbalized_pptx_indexer)
+            poll_indexer(client, verbalized_pptx_indexer, timeout_sec=1200)
 
     print(f"\n{'=' * 60}")
     print("✓ 멀티모달 파이프라인 설정 완료!")
