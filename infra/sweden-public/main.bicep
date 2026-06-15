@@ -202,6 +202,8 @@ module logicAppCrawl 'modules/logic-app-crawl.bicep' = {
     orchestratorUrl: functionCrawlerConsumption.outputs.orchestratorTriggerUrl
     crawlerLimit: crawlerLimit
     detailWorkers: 20
+    searchEndpoint: aiSearch.outputs.endpoint
+    searchServiceId: aiSearch.outputs.searchServiceId
   }
 }
 

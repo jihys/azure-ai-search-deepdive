@@ -42,6 +42,12 @@ param pollMaxDuration string = 'PT4H'
 @description('최대 폴링 횟수 (Until loop 안전 상한)')
 param pollMaxIterations int = 480
 
+@description('AI Search endpoint (예: https://search-ragi-xxxx.search.windows.net)')
+param searchEndpoint string
+
+@description('AI Search Service 리소스 ID (RBAC용)')
+param searchServiceId string
+
 var workflowName = 'logic-crawl-ragi-${take(suffix, 8)}'
 
 resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
@@ -55,7 +61,12 @@ resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
     definition: {
       '$schema': 'https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#'
       contentVersion: '1.0.0.0'
-      parameters: {}
+      parameters: {
+        searchEndpoint: {
+          type: 'String'
+          defaultValue: searchEndpoint
+        }
+      }
       triggers: {
         Daily_Schedule_Crawl_and_Preprocess: {
           type: 'Recurrence'
@@ -242,6 +253,66 @@ resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
             Log_Pipeline_Completion: ['Succeeded']
           }
         }
+        // Step 2: 4개 법률 인덱서 Fire-and-forget 실행 (Managed Identity 인증)
+        Run_Indexers_FireAndForget: {
+          type: 'Scope'
+          actions: {
+            Run_Prec_Court_Indexer: {
+              type: 'Http'
+              inputs: {
+                method: 'POST'
+                uri: '@{parameters(\'searchEndpoint\')}/indexers/prec-court-indexer/run?api-version=2024-11-01-preview'
+                authentication: {
+                  type: 'ManagedServiceIdentity'
+                  audience: 'https://search.azure.com'
+                }
+              }
+              runAfter: {}
+            }
+            Run_Const_Court_Indexer: {
+              type: 'Http'
+              inputs: {
+                method: 'POST'
+                uri: '@{parameters(\'searchEndpoint\')}/indexers/const-court-indexer/run?api-version=2024-11-01-preview'
+                authentication: {
+                  type: 'ManagedServiceIdentity'
+                  audience: 'https://search.azure.com'
+                }
+              }
+              runAfter: {}
+            }
+            Run_Legis_Interp_Indexer: {
+              type: 'Http'
+              inputs: {
+                method: 'POST'
+                uri: '@{parameters(\'searchEndpoint\')}/indexers/legis-interp-indexer/run?api-version=2024-11-01-preview'
+                authentication: {
+                  type: 'ManagedServiceIdentity'
+                  audience: 'https://search.azure.com'
+                }
+              }
+              runAfter: {}
+            }
+            Run_Admin_Appeal_Indexer: {
+              type: 'Http'
+              inputs: {
+                method: 'POST'
+                uri: '@{parameters(\'searchEndpoint\')}/indexers/admin-appeal-indexer/run?api-version=2024-11-01-preview'
+                authentication: {
+                  type: 'ManagedServiceIdentity'
+                  audience: 'https://search.azure.com'
+                }
+              }
+              runAfter: {}
+            }
+          }
+          runAfter: {
+            Check_Final_Status: ['Succeeded']
+          }
+          metadata: {
+            description: 'Step 2: Fire-and-forget — 4개 법률 인덱서 실행 (MI 인증, 완료 대기 없음)'
+          }
+        }
       }
     }
   }
@@ -251,5 +322,18 @@ resource crawlWorkflow 'Microsoft.Logic/workflows@2019-05-01' = {
   }
 }
 
+// ── RBAC: Logic App → AI Search Service Contributor (Indexer Run 호출용) ──
+var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
+resource logicAppSearchContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(searchServiceId, crawlWorkflow.id, searchServiceContributorRoleId)
+  scope: resourceGroup()
+  properties: {
+    principalId: crawlWorkflow.identity.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchServiceContributorRoleId)
+    principalType: 'ServicePrincipal'
+  }
+}
+
 output crawlWorkflowName string = crawlWorkflow.name
 output crawlWorkflowId string = crawlWorkflow.id
+output crawlWorkflowPrincipalId string = crawlWorkflow.identity.principalId

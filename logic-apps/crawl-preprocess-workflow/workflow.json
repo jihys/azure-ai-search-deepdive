@@ -1,6 +1,14 @@
 {
     "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
     "contentVersion": "1.0.0.0",
+    "parameters": {
+        "searchEndpoint": {
+            "type": "string",
+            "metadata": {
+                "description": "AI Search service endpoint (e.g. https://search-ragi-xxxx.search.windows.net)"
+            }
+        }
+    },
     "triggers": {
         "Recurrence": {
             "type": "Recurrence",
@@ -171,6 +179,62 @@
             },
             "runAfter": {
                 "Log_Pipeline_Completion": ["Succeeded"]
+            }
+        },
+        "Run_Indexers_FireAndForget": {
+            "type": "Scope",
+            "actions": {
+                "Run_Prec_Court_Indexer": {
+                    "type": "Http",
+                    "inputs": {
+                        "method": "POST",
+                        "uri": "@{parameters('searchEndpoint')}/indexers/prec-court-indexer/run?api-version=2024-11-01-preview",
+                        "authentication": {
+                            "type": "ManagedServiceIdentity",
+                            "audience": "https://search.azure.com"
+                        }
+                    },
+                    "runAfter": {}
+                },
+                "Run_Const_Court_Indexer": {
+                    "type": "Http",
+                    "inputs": {
+                        "method": "POST",
+                        "uri": "@{parameters('searchEndpoint')}/indexers/const-court-indexer/run?api-version=2024-11-01-preview",
+                        "authentication": {
+                            "type": "ManagedServiceIdentity",
+                            "audience": "https://search.azure.com"
+                        }
+                    },
+                    "runAfter": {}
+                },
+                "Run_Legis_Interp_Indexer": {
+                    "type": "Http",
+                    "inputs": {
+                        "method": "POST",
+                        "uri": "@{parameters('searchEndpoint')}/indexers/legis-interp-indexer/run?api-version=2024-11-01-preview",
+                        "authentication": {
+                            "type": "ManagedServiceIdentity",
+                            "audience": "https://search.azure.com"
+                        }
+                    },
+                    "runAfter": {}
+                },
+                "Run_Admin_Appeal_Indexer": {
+                    "type": "Http",
+                    "inputs": {
+                        "method": "POST",
+                        "uri": "@{parameters('searchEndpoint')}/indexers/admin-appeal-indexer/run?api-version=2024-11-01-preview",
+                        "authentication": {
+                            "type": "ManagedServiceIdentity",
+                            "audience": "https://search.azure.com"
+                        }
+                    },
+                    "runAfter": {}
+                }
+            },
+            "runAfter": {
+                "Check_Final_Status": ["Succeeded"]
             }
         }
     }
