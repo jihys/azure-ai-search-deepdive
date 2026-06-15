@@ -450,10 +450,10 @@
                 <mxCell id="sa-title" value="&lt;b&gt;시나리오 A: 법령 문서 자동 수집 + AI Search 인덱싱&lt;/b&gt;&lt;br&gt;Stage 1 (Logic Apps) + Stage 2 (AI Search Native Skillset) → 4개 인덱스" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fillColor=#E8EDF5;strokeColor=#0078D4;fontSize=13;fontColor=#1B3A5C;" parent="1" vertex="1">
                     <mxGeometry x="40" y="20" width="1560" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="sa-stage1" value="Stage 1: CRAWLING + DATA INTEGRATION  (Logic Apps 관장)" style="text;html=1;align=center;verticalAlign=middle;rounded=1;fillColor=#FFF9C4;strokeColor=#F9A825;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="sa-stage1" value="Stage 1: CRAWLING + DATA PREPROCESSING  (Logic Apps 관장)" style="text;html=1;align=center;verticalAlign=middle;rounded=1;fillColor=#FFF9C4;strokeColor=#F9A825;fontSize=12;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="40" y="90" width="760" height="40" as="geometry"/>
                 </mxCell>
-                <mxCell id="sa-logic" value="Logic Apps&#xa;crawl-preprocess-workflow&#xa;매일 06:00 KST" style="image;aspect=fixed;html=1;align=center;image=img/lib/azure2/integration/Logic_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="sa-logic" value="Logic Apps&#xa;crawl-preprocess-workflow&#xa;매일 21:00 UTC (06:00 KST)" style="image;aspect=fixed;html=1;align=center;image=img/lib/azure2/integration/Logic_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=9;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="60" y="150" width="60" height="60" as="geometry"/>
                 </mxCell>
                 <mxCell id="sa-step1-arrow" value="Step1: HTTP POST" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;fontSize=8;" parent="1" source="sa-logic" target="sa-crawl-fn" edge="1">

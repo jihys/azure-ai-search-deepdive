@@ -5,7 +5,7 @@
 | 시나리오 | 데이터 | 파이프라인 | 인덱스 |
 |----------|------|---------|--------|
 | **A. 법령 문서** | 한국 법령 (law.go.kr 크롤링) | Logic Apps 오케스트레이션 → AI Search Native Skillset | 4개 (prec-court / const-court / legis-interp / admin-appeal) |
-| **B. 멀티모달** | PDF / PPTX (수동 업로드) | AI Search Skillset 비교 (Basic vs Verbalized) | 3개 (basic-pdf / basic-pptx / verbalized) |
+| **B. 멀티모달** | PDF / PPTX (수동 업로드) | AI Search Skillset 비교 (Basic / Verbalized / Content Understanding) | 6개 + Image Serving |
 
 > **권장 배포**: `infra/sweden-public/` — 모든 리소스가 공개 엔드포인트로 접근 가능 (실습/워크샵용)
 > **프로덕션 변형**: `infra/sweden/` — VNet + Private Endpoints 기반 (보안 강화)
@@ -16,15 +16,15 @@
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║ Stage 1: CRAWLING + DATA INTEGRATION  (Logic Apps 관장)         ║
+║ Stage 1: CRAWLING + DATA PREPROCESSING  (Logic Apps 관장)       ║
 ║                                                              ║
-║  [Logic Apps - 매일 06:00 KST]                               ║
+║  [Logic Apps - 매일 21:00 UTC (06:00 KST)]                    ║
 ║  Recurrence 트리거                                             ║
 ║      │ Step 1: Crawl Function HTTP POST                         ║
 ║      ▼                                                          ║
 ║  law.go.kr 크롤링 → raw-documents/{source}/{date}/           ║
 ║  (prec / detc / expc / admrul - 병렬)                         ║
-║      │ Step 2: Data Integration Function HTTP POST (x4 병렬) ║
+║      │ Step 2: Data Preprocessing Function HTTP POST (x4 병렬) ║
 ║      ▼                                                          ║
 ║  메타데이터 정규화 → processed-documents/{source}/{date}/     ║
 ╚═════════════════════════════════╟═══════════════════════════╝
@@ -53,26 +53,17 @@
 ```
 [PDF/PPTX 수동 업로드]
     │
-    ▼ Blob Storage: raw/pdf/{source}/
+    ▼ Blob Storage: raw/pdf/{source}/, raw/pptx/{source}/
     │
-    ├──────────────────────────────────────────────────────────────────────────────────────┐
-│                                                                    │
-│  [Pipeline B-1: Native Only]       [Pipeline B-2: Custom+Native]  │
-│  (Skillset 비교 기준)              (Skillset 비교 실제)              │
-│                                                                    │
-│  DI Layout → Markdown              DI Layout → Markdown           │
-│  ↓                                  ↓                              │
-│  Native Text Split                 Custom WebApiSkill              │
-│  (markdown mode)                   (GPT-5.4 이미지 Verbalization)   │
-│  ↓                                  ↓                              │
-│  Embedding (3072D)                 Native Text Split               │
-│  ↓                                  ↓                              │
-│  multimodal-native-index           Embedding (3072D)              │
-│                                    ↓                              │
-│                                   multimodal-custom-index         │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+    ├─── [B-1] Basic PDF ──────────── DI Layout → markdown_split → Embed ──── multimodal-basic-index-pdf
+    ├─── [B-2] Basic PPTX ─────────── DI Layout → pptx_page_split → Embed ── multimodal-basic-index-pptx
+    ├─── [B-3] Verbalized PDF ─────── DI Layout → GPT-5.4 Verb. → Split → Embed ── multimodal-verbalized-index-pdf
+    ├─── [B-4] Verbalized PPTX ────── DI Layout → GPT-5.4 Verb. → Split → Embed ── multimodal-verbalized-index-pptx
+    ├─── [B-5] CU PDF ────────────── CU Skill (semantic chunk + image desc) → Embed ── multimodal-cu-index-pdf
+    └─── [B-6] CU PPTX ───────────── CU Skill (semantic chunk + image desc) → Embed ── multimodal-cu-index-pptx
+         + Image Serving via Agentic Retrieval (2026-05-01-preview)
          ↓
-  검색 비교 (Native vs GPT Verbalization 음질 차이 데모)
+  검색 비교 (Basic vs Verbalized vs Content Understanding 품질 차이 데모)
 ```
 
 **아키텍처 다이어그램**: [docs/architecture-sweden.drawio](docs/architecture-sweden.drawio), [docs/architecture-korea.drawio](docs/architecture-korea.drawio) (draw.io에서 열기)
@@ -89,7 +80,7 @@
 | Function App (Crawl) | Sweden Central | FC1 (Flex Consumption) | Durable Functions orchestrator |
 | Function App (Preprocess) | Sweden Central | FC1 (Flex Consumption) | JSON → JSONL 정규화 |
 | Function App (Skills) | Sweden Central | FC1 (Flex Consumption) | Custom AI Search Skills |
-| Logic App | Sweden Central | Consumption | 매일 06:00 KST 크롤링 스케줄러 |
+| Logic App | Sweden Central | Consumption | 매일 21:00 UTC (06:00 KST) 크롤링 스케줄러 |
 
 > **Private 변형** (`infra/sweden/`): 위 리소스에 VNet, Private Endpoints × 4, Private DNS Zones × 4, Shared Private Links × 3, JumpVM이 추가됩니다. 상세: [docs/infrastructure.md](docs/infrastructure.md)
 
@@ -170,7 +161,7 @@ az search shared-private-link-resource list \
 ### 4. Logic Apps 워크플로우 배포
 
 기본 1개의 워크플로우를 배포합니다:
-1. **crawl-preprocess-workflow** (매일 06:00 KST): 크롤링 → Data Integration (병렬 4개 소스)
+1. **crawl-preprocess-workflow** (매일 21:00 UTC (06:00 KST)): 크롤링 → Data Preprocessing (병렬 4개 소스)
 
 `crawl-workflow`, `rag-indexing-workflow`는 레거시/디버그용으로 파일만 유지하며 기본 배포 대상에서 제외됩니다.
 
@@ -178,7 +169,7 @@ az search shared-private-link-resource list \
 uv run python logic-apps/deploy_workflow.py
 ```
 
-### 4-1. 전처리(Data Integration) 과정
+### 4-1. 전처리(Data Preprocessing) 과정
 
 시나리오 A의 전처리는 Logic Apps Stage 1에서 수행되며, 역할은 아래로 제한됩니다.
 
@@ -196,7 +187,7 @@ Notebook `03-indexing.ipynb`에서 `src.pipeline.legal_pipeline`을 사용하여
 - Index (4개) + Native Skillset (SplitSkill + EmbeddingSkill) + DataSource + Indexer
 - 캐시 활성화: `enable_cache=True` 옵션으로 Incremental Enrichment Cache 사용
 
-**시나리오 B — 멀티모달 (3개 파이프라인, 비교용)**:
+**시나리오 B — 멀티모달 (6개 파이프라인, 비교용)**:
 
 Notebook `05-multimodal-indexing.ipynb`에서 `src.pipeline.multimodal_pipeline`을 사용합니다:
 
@@ -204,9 +195,9 @@ Notebook `05-multimodal-indexing.ipynb`에서 `src.pipeline.multimodal_pipeline`
 - **Pipeline B-2 (Basic PPTX)**: DI Layout → Custom `pptx_page_split` → Embedding
 - **Pipeline B-3 (Verbalized)**: DI Layout → Custom `verbalize` (GPT-5.4 Vision) → Custom `markdown_split` → Embedding
 
-### 5-1. Custom AI Search Skills
+### 5-1. Custom AI Search Skills (시나리오 B 전용)
 
-`skills-function/function_app.py`에 구현된 3개 Custom Web API Skill:
+`skills-function/function_app.py`에 구현된 3개 Custom Web API Skill (시나리오 B 파이프라인에서 사용):
 
 | Skill | Route | 용도 |
 |-------|-------|------|
@@ -238,8 +229,9 @@ Notebook `05-multimodal-indexing.ipynb`에서 `src.pipeline.multimodal_pipeline`
 #### 시나리오 B: 멀티모달 PDF/PPTX 인덱싱
 | 순서 | 노트북 | 설명 |
 |------|--------|------|
-| 5 | `notebooks/05-multimodal-indexing.ipynb` | PDF/PPTX 업로드 + Basic/Verbalized 3개 파이프라인 실행 |
+| 5 | `notebooks/05-multimodal-indexing.ipynb` | PDF/PPTX 업로드 + B-1~B-4 파이프라인 실행 |
 | 6 | `notebooks/06-multimodal-search.ipynb` | Basic vs Verbalized 검색 품질 비교 + 이미지 검색 데모 |
+| 7 | `notebooks/07-content-understanding.ipynb` | B-5/B-6 CU Skill 인덱싱 + Image Serving + DI Layout 대비 비교 |
 
 ## 프로젝트 구조
 
@@ -248,7 +240,7 @@ azure-ai-search-deepdive/
 ├── src/                             # Python 소스 코드
 │   ├── pipeline/
 │   │   ├── legal_pipeline.py        # 4 법률 인덱서 + Skillset + Cache 설정
-│   │   ├── multimodal_pipeline.py   # 3 멀티모달 파이프라인 (basic PDF/PPTX + verbalized)
+│   │   ├── multimodal_pipeline.py   # 4 멀티모달 파이프라인 (basic PDF/PPTX + verbalized PDF/PPTX)
 │   │   └── indexer_ops.py           # AI Search REST API 클라이언트
 │   └── search/
 │       ├── legal_indexes.py         # 4 법률 인덱스 스키마 (HNSW 3072D, ko.microsoft)
@@ -261,15 +253,16 @@ azure-ai-search-deepdive/
 │   ├── deploy_workflow.py           # Logic Apps 워크플로우 배포 (Kudu API)
 │   ├── crawl-function/              # law.go.kr 크롤러 (Azure Function)
 │   ├── preprocess-function/         # 메타데이터 정규화 (Azure Function)
-│   └── crawl-preprocess-workflow/   # 운영 워크플로우 (매일 06:00 KST)
+│   └── crawl-preprocess-workflow/   # 운영 워크플로우 (매일 21:00 UTC (06:00 KST))
 │
 ├── notebooks/                       # Step-by-Step 핸즈온 랩
 │   ├── 01-infra-deployment.ipynb    # Bicep 배포 + Function 배포 + SPL 승인
 │   ├── 02-data-crawling.ipynb       # Logic App 트리거 + 크롤링 검증
 │   ├── 03-indexing.ipynb            # 인덱스/Skillset/Indexer 생성 + Cache 테스트
 │   ├── 04-search-and-query.ipynb    # Hybrid/Semantic/RAG + Agentic Retrieval
-│   ├── 05-multimodal-indexing.ipynb # Basic/Verbalized 파이프라인 실행
-│   └── 06-multimodal-search.ipynb   # 검색 품질 비교
+│   ├── 05-multimodal-indexing.ipynb # B-1~B-4 파이프라인 실행
+│   ├── 06-multimodal-search.ipynb   # Basic vs Verbalized 검색 품질 비교
+│   └── 07-content-understanding.ipynb # B-5/B-6 CU Skill + Image Serving + 비교
 │
 ├── infra/                           # Bicep 인프라 템플릿 (리전별 분리)
 │   ├── sweden/                      # 메인 배포 (Private Network)
