@@ -25,8 +25,8 @@ src/
 └── search/
     ├── legal_indexes.py        # 4 법률 인덱스 스키마 (HNSW 3072D, ko.microsoft)
     └── multimodal_index.py     # 멀티모달 인덱스 스키마 (text+image 벡터)
-skills-function/                # Custom AI Search Skills (Azure Function)
-├── function_app.py             # 3 skills: markdown_split, pptx_page_split, verbalize
+skills-function/                # Custom AI Search Skills (Azure Function) — 미사용 (Built-in Skill로 전환됨)
+├── function_app.py             # 3 skills: markdown_split, pptx_page_split, verbalize (참고용)
 logic-apps/                     # Logic Apps + Azure Functions
 ├── deploy_workflow.py          # 워크플로우 배포 (Kudu API)
 ├── crawl-function/             # law.go.kr 크롤러

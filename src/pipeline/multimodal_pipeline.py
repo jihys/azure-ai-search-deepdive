@@ -1,11 +1,14 @@
 """
 멀티모달(PDF/PPTX) AI Search 인덱싱 파이프라인 설정.
 
-파이프라인 구성:
-  B-1 Basic PDF           : DI Layout → Custom markdown_split → Embedding
-  B-2 Basic PPTX          : DI Layout → Custom pptx_page_split → Embedding
-  B-3 Verbalized PDF      : DI Layout → GPT-5.4 Verbalize → Custom markdown_split → Embedding
-  B-4 Verbalized PPTX     : DI Layout → GPT-5.4 Verbalize → Custom markdown_split → Embedding
+파이프라인 구성 (Built-in Skill Only):
+  B-1 Basic PDF           : DI Layout (oneToOne) → SplitSkill → Embedding
+  B-2 Basic PPTX          : DI Layout (oneToOne) → SplitSkill → Embedding
+  B-3 Verbalized PDF      : imageAction → GenAI Prompt → MergeSkill → SplitSkill → Embedding
+  B-4 Verbalized PPTX     : imageAction → GenAI Prompt → MergeSkill → SplitSkill → Embedding
+
+B-1/B-2: DI Layout의 고품질 markdown 텍스트 (이미지 이해 없음)
+B-3/B-4: 표준 텍스트 추출 + normalized_images의 GenAI 이미지 설명 inline 삽입
 
 리소스 네이밍: multimodal-{type}-{resource}-{format} (prefix-free)
 """
@@ -79,48 +82,41 @@ def _create_basic_skillset(
     openai_endpoint: str,
     embedding_deployment: str,
     dimensions: int,
-    skills_function_url: str,
-    skills_function_key: str,
     ai_services_subdomain: str = "",
 ) -> None:
     print(f"  [skillset] {skillset_name}  (file_type={file_type})")
 
-    split_route = "markdown_split" if file_type == "pdf" else "pptx_page_split"
-
     skillset_payload = {
         "name": skillset_name,
-        "description": f"Multimodal {file_type.upper()}: DI Layout + Custom {split_route} + Embedding",
+        "description": f"Multimodal {file_type.upper()}: DI Layout (oneToOne) + SplitSkill + Embedding",
         "skills": [
             {
                 "@odata.type": "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill",
                 "name": "di-layout-skill",
                 "context": "/document",
-                "outputMode": "oneToMany",
+                "outputMode": "oneToOne",
                 "inputs": [{"name": "file_data", "source": "/document/file_data"}],
                 "outputs": [{"name": "markdown_document", "targetName": "layout_markdown"}],
             },
             {
-                "@odata.type": "#Microsoft.Skills.Custom.WebApiSkill",
-                "name": f"{file_type}-split-skill",
+                "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+                "name": "split-skill",
                 "context": "/document",
-                "uri": f"{skills_function_url}/api/{split_route}",
-                "httpMethod": "POST",
-                "timeout": "PT60S",
-                "batchSize": 10,
-                "degreeOfParallelism": 10,
-                "httpHeaders": {"x-functions-key": skills_function_key},
+                "textSplitMode": "pages",
+                "maximumPageLength": 2000,
+                "pageOverlapLength": 200,
                 "inputs": [{"name": "text", "source": "/document/layout_markdown"}],
-                "outputs": [{"name": "chunks", "targetName": "markdown_chunks"}],
+                "outputs": [{"name": "textItems", "targetName": "pages"}],
             },
             {
                 "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
                 "name": "embedding-skill",
-                "context": "/document/markdown_chunks/*",
+                "context": "/document/pages/*",
                 "resourceUri": openai_endpoint,
                 "deploymentId": embedding_deployment,
                 "modelName": "text-embedding-3-large",
                 "dimensions": dimensions,
-                "inputs": [{"name": "text", "source": "/document/markdown_chunks/*"}],
+                "inputs": [{"name": "text", "source": "/document/pages/*"}],
                 "outputs": [{"name": "embedding", "targetName": "chunk_vector"}],
             },
         ],
@@ -145,62 +141,63 @@ def _create_verbalized_skillset(
     openai_endpoint: str,
     embedding_deployment: str,
     dimensions: int,
-    skills_function_url: str,
-    skills_function_key: str,
+    gpt_deployment: str = "gpt-5.4",
     ai_services_subdomain: str = "",
 ) -> None:
     print(f"  [skillset] {skillset_name}")
 
+    # GenAI Prompt Skill URI: chat completions endpoint
+    genai_uri = f"{openai_endpoint.rstrip('/')}/openai/deployments/{gpt_deployment}/chat/completions"
+
     skillset_payload = {
         "name": skillset_name,
-        "description": "Multimodal PDF: DI Layout + GPT-5.4 Verbalization + Markdown Split + Embedding",
+        "description": "Multimodal Verbalized: GenAI Prompt (image verbalization) + MergeSkill + SplitSkill + Embedding",
         "skills": [
             {
-                "@odata.type": "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill",
-                "name": "di-layout-skill",
-                "context": "/document",
-                "outputMode": "oneToMany",
-                "inputs": [{"name": "file_data", "source": "/document/file_data"}],
-                "outputs": [{"name": "markdown_document", "targetName": "layout_markdown"}],
-            },
-            {
-                "@odata.type": "#Microsoft.Skills.Custom.WebApiSkill",
-                "name": "verbalize-skill",
-                "context": "/document",
-                "uri": f"{skills_function_url}/api/verbalize",
-                "httpMethod": "POST",
-                "timeout": "PT230S",
-                "batchSize": 1,
-                "degreeOfParallelism": 10,
-                "httpHeaders": {"x-functions-key": skills_function_key},
+                "@odata.type": "#Microsoft.Skills.Custom.ChatCompletionSkill",
+                "name": "genai-verbalize-skill",
+                "context": "/document/normalized_images/*",
+                "uri": genai_uri,
                 "inputs": [
-                    {"name": "markdown_text", "source": "/document/layout_markdown"},
-                    {"name": "file_data", "source": "/document/file_data"},
+                    {"name": "image", "source": "/document/normalized_images/*/data"},
+                    {"name": "systemMessage", "source": "='당신은 문서에 포함된 이미지, 도표, 차트를 분석하여 한국어로 상세하게 설명하는 AI 어시스턴트입니다. 시각적 요소의 핵심 정보를 텍스트로 정확하게 전달하세요.'"},
+                    {"name": "userMessage", "source": "='이 이미지를 분석하여 상세하게 설명해주세요. 도표나 차트인 경우 데이터와 트렌드를 포함하세요.'"},
                 ],
-                "outputs": [{"name": "verbalized_text", "targetName": "verbalized_markdown"}],
+                "outputs": [{"name": "response", "targetName": "description"}],
+                "commonModelParameters": {"temperature": 0.3, "maxTokens": 2048},
             },
             {
-                "@odata.type": "#Microsoft.Skills.Custom.WebApiSkill",
-                "name": "markdown-split-skill",
+                "@odata.type": "#Microsoft.Skills.Text.MergeSkill",
+                "name": "merge-skill",
                 "context": "/document",
-                "uri": f"{skills_function_url}/api/markdown_split",
-                "httpMethod": "POST",
-                "timeout": "PT60S",
-                "batchSize": 10,
-                "degreeOfParallelism": 10,
-                "httpHeaders": {"x-functions-key": skills_function_key},
-                "inputs": [{"name": "text", "source": "/document/verbalized_markdown"}],
-                "outputs": [{"name": "chunks", "targetName": "markdown_chunks"}],
+                "insertPreTag": " [IMAGE_DESCRIPTION: ",
+                "insertPostTag": "] ",
+                "inputs": [
+                    {"name": "text", "source": "/document/content"},
+                    {"name": "itemsToInsert", "source": "/document/normalized_images/*/description"},
+                    {"name": "offsets", "source": "/document/normalized_images/*/contentOffset"},
+                ],
+                "outputs": [{"name": "mergedText", "targetName": "merged_content"}],
+            },
+            {
+                "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+                "name": "split-skill",
+                "context": "/document",
+                "textSplitMode": "pages",
+                "maximumPageLength": 2000,
+                "pageOverlapLength": 200,
+                "inputs": [{"name": "text", "source": "/document/merged_content"}],
+                "outputs": [{"name": "textItems", "targetName": "pages"}],
             },
             {
                 "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
                 "name": "embedding-skill",
-                "context": "/document/markdown_chunks/*",
+                "context": "/document/pages/*",
                 "resourceUri": openai_endpoint,
                 "deploymentId": embedding_deployment,
                 "modelName": "text-embedding-3-large",
                 "dimensions": dimensions,
-                "inputs": [{"name": "text", "source": "/document/markdown_chunks/*"}],
+                "inputs": [{"name": "text", "source": "/document/pages/*"}],
                 "outputs": [{"name": "embedding", "targetName": "chunk_vector"}],
             },
         ],
@@ -223,15 +220,13 @@ def _index_projections(index_name: str) -> dict:
         "selectors": [{
             "targetIndexName": index_name,
             "parentKeyFieldName": "parent_id",
-            "sourceContext": "/document/markdown_chunks/*",
+            "sourceContext": "/document/pages/*",
             "mappings": [
-                {"name": "content", "source": "/document/markdown_chunks/*"},
-                {"name": "content_vector", "source": "/document/markdown_chunks/*/chunk_vector"},
+                {"name": "content", "source": "/document/pages/*"},
+                {"name": "content_vector", "source": "/document/pages/*/chunk_vector"},
                 {"name": "source_file_name", "source": "/document/metadata_storage_name"},
                 {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
                 {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
-                {"name": "file_type", "source": "/document/file_type"},
-                {"name": "source_category", "source": "/document/source_category"},
             ],
         }],
         "parameters": {"projectionMode": "skipIndexingParentDocuments"},
@@ -274,6 +269,7 @@ def _create_indexer(
     start_time: str,
     indexed_extensions: str | None = None,
     enable_cache: bool = False,
+    image_action: str | None = None,
 ) -> None:
     print(f"  [indexer] {indexer_name}")
 
@@ -284,6 +280,10 @@ def _create_indexer(
     }
     if indexed_extensions:
         config["indexedFileNameExtensions"] = indexed_extensions
+    if image_action:
+        config["imageAction"] = image_action
+        config["normalizedImageMaxWidth"] = 4200
+        config["normalizedImageMaxHeight"] = 4200
 
     indexer_payload: dict = {
         "name": indexer_name,
@@ -354,8 +354,7 @@ def setup_multimodal_pipeline(
     openai_endpoint = _env("AZURE_OPENAI_ENDPOINT")
     embedding_deployment = _env("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", default="text-embedding-3-large")
     storage_resource_id = _env("AZURE_STORAGE_RESOURCE_ID")
-    skills_function_url = _env("SKILLS_FUNCTION_URL")
-    skills_function_key = _env("SKILLS_FUNCTION_KEY")
+    gpt_deployment = _env("AZURE_OPENAI_GPT54_DEPLOYMENT", default="gpt-5.4")
     ai_services_subdomain = _env("AZURE_AI_SERVICES_ENDPOINT")
     container = container or _env("AZURE_STORAGE_CONTAINER_NAME", default="raw-documents")
     base_prefix = prefix if prefix is not None else "raw/"
@@ -410,7 +409,7 @@ def setup_multimodal_pipeline(
         _create_basic_skillset(
             client, pdf_skillset, pdf_index, "pdf",
             openai_endpoint, embedding_deployment, dimensions,
-            skills_function_url, skills_function_key, ai_services_subdomain,
+            ai_services_subdomain,
         )
         _create_indexer(
             client, pdf_indexer, datasource_pdf, pdf_index, pdf_skillset,
@@ -426,7 +425,7 @@ def setup_multimodal_pipeline(
         _create_basic_skillset(
             client, pptx_skillset, pptx_index, "pptx",
             openai_endpoint, embedding_deployment, dimensions,
-            skills_function_url, skills_function_key, ai_services_subdomain,
+            ai_services_subdomain,
         )
         _create_indexer(
             client, pptx_indexer, datasource_pptx, pptx_index, pptx_skillset,
@@ -442,12 +441,13 @@ def setup_multimodal_pipeline(
         _create_verbalized_skillset(
             client, verbalized_skillset, verbalized_index,
             openai_endpoint, embedding_deployment, dimensions,
-            skills_function_url, skills_function_key, ai_services_subdomain,
+            gpt_deployment, ai_services_subdomain,
         )
         verb_start = start_time.replace("T07:00:", "T07:30:") if "T07:00:" in start_time else start_time
         _create_indexer(
             client, verbalized_indexer, datasource_pdf, verbalized_index, verbalized_skillset,
             schedule, verb_start, indexed_extensions=".pdf", enable_cache=enable_cache,
+            image_action="generateNormalizedImages",
         )
         if run:
             run_indexer(client, verbalized_indexer)
@@ -459,12 +459,13 @@ def setup_multimodal_pipeline(
         _create_verbalized_skillset(
             client, verbalized_pptx_skillset, verbalized_pptx_index,
             openai_endpoint, embedding_deployment, dimensions,
-            skills_function_url, skills_function_key, ai_services_subdomain,
+            gpt_deployment, ai_services_subdomain,
         )
         verb_pptx_start = start_time.replace("T07:00:", "T08:00:") if "T07:00:" in start_time else start_time
         _create_indexer(
             client, verbalized_pptx_indexer, datasource_pptx, verbalized_pptx_index, verbalized_pptx_skillset,
             schedule, verb_pptx_start, indexed_extensions=".pptx", enable_cache=enable_cache,
+            image_action="generateNormalizedImages",
         )
         if run:
             run_indexer(client, verbalized_pptx_indexer)
