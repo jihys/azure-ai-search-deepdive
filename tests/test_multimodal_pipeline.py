@@ -360,3 +360,80 @@ class TestNoCustomSkillReferences:
                 body_str = str(args[2])
                 assert "x-functions-key" not in body_str, \
                     f"x-functions-key found in {args[1]}"
+
+
+# ══════════════════════════════════════════════════════════════
+# Issue 0021: academic_field 필터 필드 추가
+# ══════════════════════════════════════════════════════════════
+
+
+class TestAcademicFieldMapping:
+    """academic_field 필터 필드가 인덱스/스킬셋/프로젝션에 올바르게 추가되었는지 검증."""
+
+    def test_index_has_academic_field(self, mock_client):
+        """인덱스 스키마에 academic_field 필드가 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+        setup_multimodal_pipeline(pipeline="pdf", client=mock_client)
+
+        index_body = _find_request_call(mock_client, "PUT", "/indexes/multimodal-basic-index-pdf")
+        assert index_body is not None
+        field_names = [f["name"] for f in index_body["fields"]]
+        assert "academic_field" in field_names
+
+        af_field = [f for f in index_body["fields"] if f["name"] == "academic_field"][0]
+        assert af_field["filterable"] is True
+        assert af_field["facetable"] is True
+
+    def test_basic_skillset_has_conditional_skill(self, mock_client):
+        """Basic 스킬셋에 ConditionalSkill이 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+        setup_multimodal_pipeline(pipeline="pdf", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-basic-skillset-pdf")
+        types = _skill_types(_extract_skills(skillset_body))
+        assert "#Microsoft.Skills.Util.ConditionalSkill" in types
+
+    def test_verbalized_skillset_has_conditional_skill(self, mock_client):
+        """Verbalized 스킬셋에 ConditionalSkill이 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+        setup_multimodal_pipeline(pipeline="verbalized", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-verbalized-skillset-pdf")
+        types = _skill_types(_extract_skills(skillset_body))
+        assert "#Microsoft.Skills.Util.ConditionalSkill" in types
+
+    def test_projection_has_academic_field(self, mock_client):
+        """Index projection에 academic_field 매핑이 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+        setup_multimodal_pipeline(pipeline="pdf", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-basic-skillset-pdf")
+        mappings = skillset_body["indexProjections"]["selectors"][0]["mappings"]
+        mapping_names = [m["name"] for m in mappings]
+        assert "academic_field" in mapping_names
+
+        af_mapping = [m for m in mappings if m["name"] == "academic_field"][0]
+        assert af_mapping["source"] == "/document/academic_field"
+
+    def test_verbalized_projection_has_academic_field(self, mock_client):
+        """Verbalized projection의 text+image selector 모두에 academic_field 매핑이 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+        setup_multimodal_pipeline(pipeline="verbalized", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-verbalized-skillset-pdf")
+        selectors = skillset_body["indexProjections"]["selectors"]
+        for selector in selectors:
+            mapping_names = [m["name"] for m in selector["mappings"]]
+            assert "academic_field" in mapping_names, \
+                f"academic_field missing in selector with sourceContext={selector['sourceContext']}"
+
+    def test_conditional_skill_before_embedding(self, mock_client):
+        """ConditionalSkill이 embedding-skill보다 앞에 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+        setup_multimodal_pipeline(pipeline="pdf", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-basic-skillset-pdf")
+        skills = _extract_skills(skillset_body)
+        cond_idx = next(i for i, s in enumerate(skills) if s.get("@odata.type") == "#Microsoft.Skills.Util.ConditionalSkill")
+        embed_idx = next(i for i, s in enumerate(skills) if s.get("name") == "embedding-skill")
+        assert cond_idx < embed_idx

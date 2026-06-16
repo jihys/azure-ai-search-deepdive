@@ -47,6 +47,7 @@ def _create_index(client: SearchAdminClient, index_name: str, dimensions: int = 
             {"name": "content_type", "type": "Edm.String", "filterable": True, "facetable": True},
             {"name": "file_type", "type": "Edm.String", "filterable": True, "facetable": True, "retrievable": True},
             {"name": "source_category", "type": "Edm.String", "filterable": True, "facetable": True, "retrievable": True},
+            {"name": "academic_field", "type": "Edm.String", "filterable": True, "facetable": True, "retrievable": True},
             {"name": "content", "type": "Edm.String", "searchable": True, "analyzer": "ko.lucene"},
             {
                 "name": "content_vector", "type": "Collection(Edm.Single)",
@@ -70,6 +71,30 @@ def _create_index(client: SearchAdminClient, index_name: str, dimensions: int = 
         },
     })
     print(f"    ✓ created")
+
+
+# ── Academic field skill ─────────────────────────────────────
+
+def _academic_field_skill() -> dict:
+    """파일명 prefix(ST_/SS_/HA_)로 academic_field를 매핑하는 ConditionalSkill."""
+    return {
+        "@odata.type": "#Microsoft.Skills.Util.ConditionalSkill",
+        "name": "academic-field-skill",
+        "context": "/document",
+        "inputs": [
+            {"name": "condition", "source": "= $(/document/metadata_storage_name) != null"},
+            {
+                "name": "whenTrue",
+                "source": (
+                    "= if(indexOf($(/document/metadata_storage_name), 'ST_') == 0, '과학기술',"
+                    " if(indexOf($(/document/metadata_storage_name), 'SS_') == 0, '사회과학',"
+                    " if(indexOf($(/document/metadata_storage_name), 'HA_') == 0, '인문학예술체육학', null)))"
+                ),
+            },
+            {"name": "whenFalse", "source": "= null"},
+        ],
+        "outputs": [{"name": "output", "targetName": "academic_field"}],
+    }
 
 
 # ── Skillsets ────────────────────────────────────────────────
@@ -99,6 +124,7 @@ def _create_basic_skillset(
                 "inputs": [{"name": "file_data", "source": "/document/file_data"}],
                 "outputs": [{"name": "markdown_document", "targetName": "markdown_sections"}],
             },
+            _academic_field_skill(),
             {
                 "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
                 "name": "split-skill",
@@ -163,6 +189,7 @@ def _create_verbalized_skillset(
                 "inputs": [{"name": "file_data", "source": "/document/file_data"}],
                 "outputs": [{"name": "markdown_document", "targetName": "markdown_sections"}],
             },
+            _academic_field_skill(),
             {
                 "@odata.type": "#Microsoft.Skills.Custom.ChatCompletionSkill",
                 "name": "genai-verbalize-skill",
@@ -235,6 +262,7 @@ def _index_projections(index_name: str, *, verbalized: bool = False) -> dict:
             {"name": "source_file_name", "source": "/document/metadata_storage_name"},
             {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
             {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
+            {"name": "academic_field", "source": "/document/academic_field"},
         ],
     }
 
@@ -255,6 +283,7 @@ def _index_projections(index_name: str, *, verbalized: bool = False) -> dict:
             {"name": "source_file_name", "source": "/document/metadata_storage_name"},
             {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
             {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
+            {"name": "academic_field", "source": "/document/academic_field"},
         ],
     }
 
