@@ -2,13 +2,13 @@
 멀티모달(PDF/PPTX) AI Search 인덱싱 파이프라인 설정.
 
 파이프라인 구성 (Built-in Skill Only):
-  B-1 Basic PDF           : DI Layout (oneToOne) → SplitSkill → Embedding
-  B-2 Basic PPTX          : DI Layout (oneToOne) → SplitSkill → Embedding
-  B-3 Verbalized PDF      : imageAction → GenAI Prompt → MergeSkill → SplitSkill → Embedding
-  B-4 Verbalized PPTX     : imageAction → GenAI Prompt → MergeSkill → SplitSkill → Embedding
+  B-1 Basic PDF           : DI Layout (oneToMany, h2) → SplitSkill (safety) → Embedding
+  B-2 Basic PPTX          : DI Layout (oneToMany, h2) → SplitSkill (safety) → Embedding
+  B-3 Verbalized PDF      : DI Layout (oneToMany, h2) → SplitSkill → Embedding (text) + GenAI Prompt → Embedding (images)
+  B-4 Verbalized PPTX     : DI Layout (oneToMany, h2) → SplitSkill → Embedding (text) + GenAI Prompt → Embedding (images)
 
-B-1/B-2: DI Layout의 고품질 markdown 텍스트 (이미지 이해 없음)
-B-3/B-4: 표준 텍스트 추출 + normalized_images의 GenAI 이미지 설명 inline 삽입
+B-1/B-2: DI Layout으로 Markdown 헤더(H2) 기준 시맨틱 청킹 (이미지 이해 없음)
+B-3/B-4: B-1/B-2와 동일한 텍스트 청킹 + GenAI 이미지 설명을 별도 청크로 인덱싱
 
 리소스 네이밍: multimodal-{type}-{resource}-{format} (prefix-free)
 """
@@ -88,35 +88,36 @@ def _create_basic_skillset(
 
     skillset_payload = {
         "name": skillset_name,
-        "description": f"Multimodal {file_type.upper()}: DI Layout (oneToOne) + SplitSkill + Embedding",
+        "description": f"Multimodal {file_type.upper()}: DI Layout (oneToMany, h2) + SplitSkill (safety) + Embedding",
         "skills": [
             {
                 "@odata.type": "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill",
                 "name": "di-layout-skill",
                 "context": "/document",
-                "outputMode": "oneToOne",
+                "outputMode": "oneToMany",
+                "markdownHeaderDepth": "h2",
                 "inputs": [{"name": "file_data", "source": "/document/file_data"}],
-                "outputs": [{"name": "markdown_document", "targetName": "layout_markdown"}],
+                "outputs": [{"name": "markdown_document", "targetName": "markdown_sections"}],
             },
             {
                 "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
                 "name": "split-skill",
-                "context": "/document",
+                "context": "/document/markdown_sections/*",
                 "textSplitMode": "pages",
                 "maximumPageLength": 2000,
                 "pageOverlapLength": 200,
-                "inputs": [{"name": "text", "source": "/document/layout_markdown"}],
+                "inputs": [{"name": "text", "source": "/document/markdown_sections/*/content"}],
                 "outputs": [{"name": "textItems", "targetName": "pages"}],
             },
             {
                 "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
                 "name": "embedding-skill",
-                "context": "/document/pages/*",
+                "context": "/document/markdown_sections/*/pages/*",
                 "resourceUri": openai_endpoint,
                 "deploymentId": embedding_deployment,
                 "modelName": "text-embedding-3-large",
                 "dimensions": dimensions,
-                "inputs": [{"name": "text", "source": "/document/pages/*"}],
+                "inputs": [{"name": "text", "source": "/document/markdown_sections/*/pages/*"}],
                 "outputs": [{"name": "embedding", "targetName": "chunk_vector"}],
             },
         ],
@@ -151,8 +152,17 @@ def _create_verbalized_skillset(
 
     skillset_payload = {
         "name": skillset_name,
-        "description": "Multimodal Verbalized: GenAI Prompt (image verbalization) + MergeSkill + SplitSkill + Embedding",
+        "description": "Multimodal Verbalized: DI Layout (oneToMany, h2) + SplitSkill + Embedding (text) + GenAI Prompt + Embedding (images)",
         "skills": [
+            {
+                "@odata.type": "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill",
+                "name": "di-layout-skill",
+                "context": "/document",
+                "outputMode": "oneToMany",
+                "markdownHeaderDepth": "h2",
+                "inputs": [{"name": "file_data", "source": "/document/file_data"}],
+                "outputs": [{"name": "markdown_document", "targetName": "markdown_sections"}],
+            },
             {
                 "@odata.type": "#Microsoft.Skills.Custom.ChatCompletionSkill",
                 "name": "genai-verbalize-skill",
@@ -167,41 +177,39 @@ def _create_verbalized_skillset(
                 "commonModelParameters": {"temperature": 0.3, "maxTokens": 2048},
             },
             {
-                "@odata.type": "#Microsoft.Skills.Text.MergeSkill",
-                "name": "merge-skill",
-                "context": "/document",
-                "insertPreTag": " [IMAGE_DESCRIPTION: ",
-                "insertPostTag": "] ",
-                "inputs": [
-                    {"name": "text", "source": "/document/content"},
-                    {"name": "itemsToInsert", "source": "/document/normalized_images/*/description"},
-                    {"name": "offsets", "source": "/document/normalized_images/*/contentOffset"},
-                ],
-                "outputs": [{"name": "mergedText", "targetName": "merged_content"}],
-            },
-            {
                 "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
                 "name": "split-skill",
-                "context": "/document",
+                "context": "/document/markdown_sections/*",
                 "textSplitMode": "pages",
                 "maximumPageLength": 2000,
                 "pageOverlapLength": 200,
-                "inputs": [{"name": "text", "source": "/document/merged_content"}],
+                "inputs": [{"name": "text", "source": "/document/markdown_sections/*/content"}],
                 "outputs": [{"name": "textItems", "targetName": "pages"}],
             },
             {
                 "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
                 "name": "embedding-skill",
-                "context": "/document/pages/*",
+                "context": "/document/markdown_sections/*/pages/*",
                 "resourceUri": openai_endpoint,
                 "deploymentId": embedding_deployment,
                 "modelName": "text-embedding-3-large",
                 "dimensions": dimensions,
-                "inputs": [{"name": "text", "source": "/document/pages/*"}],
+                "inputs": [{"name": "text", "source": "/document/markdown_sections/*/pages/*"}],
+                "outputs": [{"name": "embedding", "targetName": "chunk_vector"}],
+            },
+            {
+                "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+                "name": "embedding-skill-image",
+                "context": "/document/normalized_images/*",
+                "resourceUri": openai_endpoint,
+                "deploymentId": embedding_deployment,
+                "modelName": "text-embedding-3-large",
+                "dimensions": dimensions,
+                "inputs": [{"name": "text", "source": "/document/normalized_images/*/description"}],
                 "outputs": [{"name": "embedding", "targetName": "chunk_vector"}],
             },
         ],
-        "indexProjections": _index_projections(index_name),
+        "indexProjections": _index_projections(index_name, verbalized=True),
     }
 
     if ai_services_subdomain:
@@ -215,20 +223,43 @@ def _create_verbalized_skillset(
     print(f"    ✓ upserted")
 
 
-def _index_projections(index_name: str) -> dict:
+def _index_projections(index_name: str, *, verbalized: bool = False) -> dict:
+    text_selector = {
+        "targetIndexName": index_name,
+        "parentKeyFieldName": "parent_id",
+        "sourceContext": "/document/markdown_sections/*/pages/*",
+        "mappings": [
+            {"name": "content", "source": "/document/markdown_sections/*/pages/*"},
+            {"name": "content_vector", "source": "/document/markdown_sections/*/pages/*/chunk_vector"},
+            {"name": "content_type", "source": "='text'"},
+            {"name": "source_file_name", "source": "/document/metadata_storage_name"},
+            {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
+            {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
+        ],
+    }
+
+    if not verbalized:
+        return {
+            "selectors": [text_selector],
+            "parameters": {"projectionMode": "skipIndexingParentDocuments"},
+        }
+
+    image_selector = {
+        "targetIndexName": index_name,
+        "parentKeyFieldName": "parent_id",
+        "sourceContext": "/document/normalized_images/*",
+        "mappings": [
+            {"name": "content", "source": "/document/normalized_images/*/description"},
+            {"name": "content_vector", "source": "/document/normalized_images/*/chunk_vector"},
+            {"name": "content_type", "source": "='image_description'"},
+            {"name": "source_file_name", "source": "/document/metadata_storage_name"},
+            {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
+            {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
+        ],
+    }
+
     return {
-        "selectors": [{
-            "targetIndexName": index_name,
-            "parentKeyFieldName": "parent_id",
-            "sourceContext": "/document/pages/*",
-            "mappings": [
-                {"name": "content", "source": "/document/pages/*"},
-                {"name": "content_vector", "source": "/document/pages/*/chunk_vector"},
-                {"name": "source_file_name", "source": "/document/metadata_storage_name"},
-                {"name": "source_blob_path", "source": "/document/metadata_storage_path"},
-                {"name": "metadata_storage_last_modified", "source": "/document/metadata_storage_last_modified"},
-            ],
-        }],
+        "selectors": [text_selector, image_selector],
         "parameters": {"projectionMode": "skipIndexingParentDocuments"},
     }
 

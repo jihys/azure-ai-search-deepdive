@@ -110,8 +110,8 @@ class TestBasicSkillset:
         assert split.get("maximumPageLength") == 2000
         assert split.get("pageOverlapLength") == 200
 
-    def test_di_layout_one_to_one(self, mock_client):
-        """Basic 스킬셋의 DI Layout이 oneToOne 모드여야 한다."""
+    def test_di_layout_one_to_many(self, mock_client):
+        """Basic 스킬셋의 DI Layout이 oneToMany 모드 + markdownHeaderDepth h2여야 한다."""
         from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
 
         setup_multimodal_pipeline(pipeline="pdf", client=mock_client)
@@ -120,10 +120,11 @@ class TestBasicSkillset:
         skills = _extract_skills(skillset_body)
         di_skills = [s for s in skills if "DocumentIntelligenceLayout" in s.get("@odata.type", "")]
         assert len(di_skills) == 1
-        assert di_skills[0].get("outputMode") == "oneToOne"
+        assert di_skills[0].get("outputMode") == "oneToMany"
+        assert di_skills[0].get("markdownHeaderDepth") == "h2"
 
     def test_index_projection_source_context(self, mock_client):
-        """Index projection sourceContext가 /document/pages/* 여야 한다."""
+        """Index projection sourceContext가 /document/markdown_sections/*/pages/* 여야 한다."""
         from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
 
         setup_multimodal_pipeline(pipeline="pdf", client=mock_client)
@@ -132,7 +133,19 @@ class TestBasicSkillset:
         projections = skillset_body.get("indexProjections", {})
         selectors = projections.get("selectors", [])
         assert len(selectors) == 1
-        assert selectors[0]["sourceContext"] == "/document/pages/*"
+        assert selectors[0]["sourceContext"] == "/document/markdown_sections/*/pages/*"
+
+    def test_content_type_mapping(self, mock_client):
+        """Basic projection에 content_type='text' 매핑이 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+
+        setup_multimodal_pipeline(pipeline="pdf", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-basic-skillset-pdf")
+        mappings = skillset_body["indexProjections"]["selectors"][0]["mappings"]
+        ct_mappings = [m for m in mappings if m["name"] == "content_type"]
+        assert len(ct_mappings) == 1
+        assert ct_mappings[0]["source"] == "='text'"
 
     def test_no_skills_function_params(self, mock_client):
         """setup_multimodal_pipeline()이 skills_function 환경변수 없이 동작해야 한다."""
@@ -206,16 +219,16 @@ class TestVerbalizedSkillset:
         assert len(genai_skills) == 1
         assert genai_skills[0].get("context") == "/document/normalized_images/*"
 
-    def test_has_merge_skill(self, mock_client):
-        """Verbalized 스킬셋에 MergeSkill이 있어야 한다."""
+    def test_no_merge_skill(self, mock_client):
+        """Verbalized 스킬셋에 MergeSkill이 없어야 한다 (이미지 설명은 별도 청크)."""
         from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
 
         setup_multimodal_pipeline(pipeline="verbalized", client=mock_client)
 
         skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-verbalized-skillset-pdf")
         types = _skill_types(_extract_skills(skillset_body))
-        assert "#Microsoft.Skills.Text.MergeSkill" in types, \
-            f"MergeSkill should be in verbalized skillset, got: {types}"
+        assert "#Microsoft.Skills.Text.MergeSkill" not in types, \
+            f"MergeSkill should not be in verbalized skillset (images are separate chunks), got: {types}"
 
     def test_has_split_skill(self, mock_client):
         """Verbalized 스킬셋에 SplitSkill이 있어야 한다."""
@@ -228,16 +241,45 @@ class TestVerbalizedSkillset:
         assert "#Microsoft.Skills.Text.SplitSkill" in types, \
             f"SplitSkill should be in verbalized skillset, got: {types}"
 
-    def test_no_di_layout_skill(self, mock_client):
-        """Verbalized 스킬셋에 DI Layout 스킬이 없어야 한다 (표준 텍스트 추출 사용)."""
+    def test_has_di_layout_one_to_many(self, mock_client):
+        """Verbalized 스킬셋에 DI Layout (oneToMany, h2)이 있어야 한다."""
         from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
 
         setup_multimodal_pipeline(pipeline="verbalized", client=mock_client)
 
         skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-verbalized-skillset-pdf")
-        types = _skill_types(_extract_skills(skillset_body))
-        assert "#Microsoft.Skills.Util.DocumentIntelligenceLayoutSkill" not in types, \
-            f"DI Layout should not be in verbalized skillset, got: {types}"
+        skills = _extract_skills(skillset_body)
+        di_skills = [s for s in skills if "DocumentIntelligenceLayout" in s.get("@odata.type", "")]
+        assert len(di_skills) == 1
+        assert di_skills[0].get("outputMode") == "oneToMany"
+        assert di_skills[0].get("markdownHeaderDepth") == "h2"
+
+    def test_two_embedding_skills(self, mock_client):
+        """Verbalized 스킬셋에 2개 Embedding 스킬(text + image)이 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+
+        setup_multimodal_pipeline(pipeline="verbalized", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-verbalized-skillset-pdf")
+        skills = _extract_skills(skillset_body)
+        embed_skills = [s for s in skills if "AzureOpenAIEmbedding" in s.get("@odata.type", "")]
+        assert len(embed_skills) == 2, f"Expected 2 embedding skills, got {len(embed_skills)}"
+        contexts = {s.get("context") for s in embed_skills}
+        assert "/document/markdown_sections/*/pages/*" in contexts
+        assert "/document/normalized_images/*" in contexts
+
+    def test_two_projection_selectors(self, mock_client):
+        """Verbalized projections에 text + image 2개 selector가 있어야 한다."""
+        from src.pipeline.multimodal_pipeline import setup_multimodal_pipeline
+
+        setup_multimodal_pipeline(pipeline="verbalized", client=mock_client)
+
+        skillset_body = _find_request_call(mock_client, "PUT", "/skillsets/multimodal-verbalized-skillset-pdf")
+        selectors = skillset_body["indexProjections"]["selectors"]
+        assert len(selectors) == 2
+        contexts = {s["sourceContext"] for s in selectors}
+        assert "/document/markdown_sections/*/pages/*" in contexts
+        assert "/document/normalized_images/*" in contexts
 
     def test_genai_uses_mi_auth(self, mock_client):
         """GenAI Prompt Skill이 apiKey 없이 MI 인증을 사용해야 한다."""
