@@ -55,10 +55,10 @@
     │
     ▼ Blob Storage: raw/pdf/{source}/, raw/pptx/{source}/
     │
-    ├─── [B-1] Basic PDF ──────────── DI Layout → markdown_split → Embed ──── multimodal-basic-index-pdf
-    ├─── [B-2] Basic PPTX ─────────── DI Layout → pptx_page_split → Embed ── multimodal-basic-index-pptx
-    ├─── [B-3] Verbalized PDF ─────── DI Layout → GPT-5.4 Verb. → Split → Embed ── multimodal-verbalized-index-pdf
-    ├─── [B-4] Verbalized PPTX ────── DI Layout → GPT-5.4 Verb. → Split → Embed ── multimodal-verbalized-index-pptx
+    ├─── [B-1] Basic PDF ──────────── DI Layout → SplitSkill → Embed ──── multimodal-basic-index-pdf
+    ├─── [B-2] Basic PPTX ─────────── DI Layout → SplitSkill → Embed ── multimodal-basic-index-pptx
+    ├─── [B-3] Verbalized PDF ─────── imageAction → GenAI Prompt → Merge → Split → Embed ── multimodal-verbalized-index-pdf
+    ├─── [B-4] Verbalized PPTX ────── imageAction → GenAI Prompt → Merge → Split → Embed ── multimodal-verbalized-index-pptx
     ├─── [B-5] CU PDF ────────────── CU Skill (semantic chunk + image desc) → Embed ── multimodal-cu-index-pdf
     └─── [B-6] CU PPTX ───────────── CU Skill (semantic chunk + image desc) → Embed ── multimodal-cu-index-pptx
          + Image Serving via Agentic Retrieval (2026-05-01-preview)
@@ -79,7 +79,7 @@
 | Azure AI Search | Sweden Central | **Standard (S1)** | Hybrid + Semantic Ranker |
 | Function App (Crawl) | Sweden Central | FC1 (Flex Consumption) | Durable Functions orchestrator |
 | Function App (Preprocess) | Sweden Central | FC1 (Flex Consumption) | JSON → JSONL 정규화 |
-| Function App (Skills) | Sweden Central | FC1 (Flex Consumption) | Custom AI Search Skills |
+| Function App (Skills) | Sweden Central | FC1 (Flex Consumption) | Custom AI Search Skills (미사용 — Built-in Skill로 전환됨) |
 | Logic App | Sweden Central | Consumption | 매일 21:00 UTC (06:00 KST) 크롤링 스케줄러 |
 
 > **Private 변형** (`infra/sweden/`): 위 리소스에 VNet, Private Endpoints × 4, Private DNS Zones × 4, Shared Private Links × 3, JumpVM이 추가됩니다. 상세: [docs/infrastructure.md](docs/infrastructure.md)
@@ -89,7 +89,7 @@
 - Azure 구독 (Contributor 권한)
 - Azure CLI (`az login` 완료)
 - [Bicep CLI](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install) (인프라 배포)
-- [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local#install-the-azure-functions-core-tools) (Function App 배포)
+- [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local#install-the-azure-functions-core-tools) (Function App 배포 — `crawl-function`, `preprocess-function` 2개만 필요)
 - Python 3.10+
 - [uv](https://github.com/astral-sh/uv) (Python 패키지 관리)
 
@@ -191,19 +191,14 @@ Notebook `03-indexing.ipynb`에서 `src.pipeline.legal_pipeline`을 사용하여
 
 Notebook `05-multimodal-indexing.ipynb`에서 `src.pipeline.multimodal_pipeline`을 사용합니다:
 
-- **Pipeline B-1 (Basic PDF)**: DI Layout → Custom `markdown_split` → Embedding
-- **Pipeline B-2 (Basic PPTX)**: DI Layout → Custom `pptx_page_split` → Embedding
-- **Pipeline B-3 (Verbalized)**: DI Layout → Custom `verbalize` (GPT-5.4 Vision) → Custom `markdown_split` → Embedding
+- **Pipeline B-1 (Basic PDF)**: DI Layout → `SplitSkill` → Embedding
+- **Pipeline B-2 (Basic PPTX)**: DI Layout → `SplitSkill` → Embedding
+- **Pipeline B-3 (Verbalized PDF)**: `imageAction` → `ChatCompletionSkill` (GenAI Prompt) → `MergeSkill` → `SplitSkill` → Embedding
+- **Pipeline B-4 (Verbalized PPTX)**: `imageAction` → `ChatCompletionSkill` (GenAI Prompt) → `MergeSkill` → `SplitSkill` → Embedding
 
-### 5-1. Custom AI Search Skills (시나리오 B 전용)
+### 5-1. Built-in Skills (시나리오 B 전용)
 
-`skills-function/function_app.py`에 구현된 3개 Custom Web API Skill (시나리오 B 파이프라인에서 사용):
-
-| Skill | Route | 용도 |
-|-------|-------|------|
-| `markdown_split` | `/api/markdown_split` | Markdown 헤더 기반 텍스트 분할 (2000자 / 200자 overlap) |
-| `pptx_page_split` | `/api/pptx_page_split` | `<!-- PageBreak -->` 마커 기반 슬라이드 분할 |
-| `verbalize` | `/api/verbalize` | GPT-5.4 Vision으로 이미지/차트를 텍스트 설명으로 변환 |
+> ℹ️ v2.1부터 Custom WebAPI Skills는 Built-in Skills (SplitSkill, ChatCompletionSkill, MergeSkill)로 전환되었습니다. `skills-function/` 디렉토리는 참고용으로만 유지됩니다.
 
 ### 5-2. Incremental Enrichment Cache
 
@@ -246,8 +241,8 @@ azure-ai-search-deepdive/
 │       ├── legal_indexes.py         # 4 법률 인덱스 스키마 (HNSW 3072D, ko.microsoft)
 │       └── multimodal_index.py      # 멀티모달 인덱스 스키마 (text+image 벡터)
 │
-├── skills-function/                 # Custom AI Search Skills (Azure Function)
-│   └── function_app.py              # 3 skills: markdown_split, pptx_page_split, verbalize
+├── skills-function/                 # Custom AI Search Skills (미사용 — Built-in Skill로 전환됨, 참고용)
+│   └── function_app.py              # 3 skills: markdown_split, pptx_page_split, verbalize (참고용)
 │
 ├── logic-apps/
 │   ├── deploy_workflow.py           # Logic Apps 워크플로우 배포 (Kudu API)
@@ -305,6 +300,7 @@ azure-ai-search-deepdive/
 | 네트워크 | VNet + PE 필수 | **공개 엔드포인트** (sweden-public), VNet+PE 선택 (sweden) |
 | Foundry Hub | Hub + Project + KeyVault 별도 배포 | **AI Services 하위 프로젝트** (Hub 불필요) |
 | 폴링 타임아웃 | PT4H (4시간) | **PT24H** (24시간) |
+| Custom Skills | Custom WebAPI Skills (markdown_split, pptx_page_split, verbalize) | **Built-in Skills** (SplitSkill, ChatCompletionSkill, MergeSkill) |
 
 ## Private Network 접근 방법
 

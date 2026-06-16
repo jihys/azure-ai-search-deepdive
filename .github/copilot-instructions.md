@@ -16,17 +16,17 @@ Azure AI Search 핵심 기능을 2개 시나리오(법령 문서 / 멀티모달)
 | 디렉토리 | 역할 |
 |-----------|------|
 | `src/` | 핵심 라이브러리 (crawler, preprocessing, search, blob) |
-| `notebooks/` | 핸즈온 랩 노트북 01~06 |
+| `notebooks/` | 핸즈온 랩 노트북 01~07 |
 | `scripts/` | CLI 스크립트 (인덱싱, 시드 데이터 등) |
 | `infra/` | Bicep IaC (korea, sweden, sweden-public) |
 | `logic-apps/` | Logic Apps 워크플로우 + Azure Functions |
-| `skills-function/` | Custom Skills Azure Function |
+| `skills-function/` | Custom Skills Azure Function (미사용 — Built-in Skill로 전환됨, 참고용) |
 | `data/` | raw/processed/samples 데이터 |
 
 ## 시나리오
 
 - **A. 법령 문서**: law.go.kr 크롤링 → Logic Apps → AI Search Skillset → 4개 인덱스
-- **B. 멀티모달**: PDF/PPTX → AI Search Skillset 비교 (Native vs Custom+Native) → 2개 인덱스
+- **B. 멀티모달**: PDF/PPTX → AI Search Skillset 비교 (Basic vs Verbalized, Built-in Skill) → 2개 인덱스
 
 ## Fix at Origin 원칙
 

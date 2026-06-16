@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_VERSION = "2024-11-01-preview"
+API_VERSION = "2026-04-01"
 
 
 class SearchAdminClient:
