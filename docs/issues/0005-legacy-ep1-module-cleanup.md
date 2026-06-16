@@ -16,7 +16,7 @@
 
 ## Acceptance criteria
 
-- [ ] `modules/function-crawler.bicep` 삭제됨
-- [ ] `modules/function-preprocess.bicep` 삭제됨
-- [ ] `modules/function-skills.bicep` 삭제됨
-- [ ] main.bicep에서 해당 파일들을 참조하지 않음
+- [x] `modules/function-crawler.bicep` 삭제됨
+- [x] `modules/function-preprocess.bicep` 삭제됨
+- [x] `modules/function-skills.bicep` 삭제됨
+- [x] main.bicep에서 해당 파일들을 참조하지 않음

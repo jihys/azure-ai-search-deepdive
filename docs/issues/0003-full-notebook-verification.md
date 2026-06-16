@@ -19,10 +19,10 @@
 
 ## Acceptance criteria
 
-- [ ] nb01~nb06 각각 전체 셀 실행 시 에러 없음
-- [ ] `src.pipeline` import가 nb01/nb03/nb05에서 정상 동작
-- [ ] `git status`에서 `data/*.zip` 파일이 표시되지 않음
-- [ ] `notebooks/` 디렉토리에 `.ipynb` 외 파일 없음
+- [x] nb01~nb06 각각 전체 셀 실행 시 에러 없음
+- [x] `src.pipeline` import가 nb01/nb03/nb05에서 정상 동작
+- [x] `git status`에서 `data/*.zip` 파일이 표시되지 않음
+- [x] `notebooks/` 디렉토리에 `.ipynb` 외 파일 없음
 
 ## Blocked by
 

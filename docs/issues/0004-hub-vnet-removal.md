@@ -27,9 +27,9 @@ PUBLIC variant는 모든 리소스가 공개적으로 접근 가능한 워크샵
 
 ## Acceptance criteria
 
-- [ ] main.bicep에서 `vnet`, `foundryHub` 모듈 참조 완전 제거
-- [ ] FC1 모듈 3개에서 `funcSubnetId` 관련 코드 완전 제거
-- [ ] `modules/vnet.bicep` 삭제됨
-- [ ] `modules/foundry-hub.bicep` 삭제됨
-- [ ] outputs에서 VNet/Foundry 관련 출력 제거됨
-- [ ] 남은 Bicep 코드에 `vnet`이나 `foundryHub` 참조가 없음
+- [x] main.bicep에서 `vnet`, `foundryHub` 모듈 참조 완전 제거
+- [x] FC1 모듈 3개에서 `funcSubnetId` 관련 코드 완전 제거
+- [x] `modules/vnet.bicep` 삭제됨
+- [x] `modules/foundry-hub.bicep` 삭제됨
+- [x] outputs에서 VNet/Foundry 관련 출력 제거됨
+- [x] 남은 Bicep 코드에 `vnet`이나 `foundryHub` 참조가 없음

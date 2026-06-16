@@ -30,15 +30,15 @@
 
 ## Acceptance criteria
 
-- [ ] `src/`에 `search/`와 `__init__.py`만 남아있음 (`blob/`, `crawler/`, `preprocessing/` 없음)
-- [ ] `src/search/`에 `legal_indexes.py`, `multimodal_index.py`, `__init__.py`만 있음 (`index_manager.py` 없음)
-- [ ] `data/samples/` 디렉토리 없음
-- [ ] `data/raw/`에 `*.pdf`만 있음 (날짜별 폴더 없음)
-- [ ] `.gitignore`에 `data/*.zip` 패턴 존재
-- [ ] `notebooks/`에 `.ipynb` 파일만 있음
-- [ ] `docs/reports/`에 리포트 7개 존재
-- [ ] 루트에 `multi-modal-report-en.md` 없음
-- [ ] `scripts/` 디렉토리에 `__pycache__` 없음
+- [x] `src/`에 `search/`와 `__init__.py`만 남아있음 (`blob/`, `crawler/`, `preprocessing/` 없음)
+- [x] `src/search/`에 `legal_indexes.py`, `multimodal_index.py`, `__init__.py`만 있음 (`index_manager.py` 없음)
+- [x] `data/samples/` 디렉토리 없음
+- [x] `data/raw/`에 `*.pdf`만 있음 (날짜별 폴더 없음)
+- [x] `.gitignore`에 `data/*.zip` 패턴 존재
+- [x] `notebooks/`에 `.ipynb` 파일만 있음
+- [x] `docs/reports/`에 리포트 7개 존재
+- [x] 루트에 `multi-modal-report-en.md` 없음
+- [x] `scripts/` 디렉토리에 `__pycache__` 없음
 
 ## Blocked by
 

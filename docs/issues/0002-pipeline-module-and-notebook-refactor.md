@@ -23,13 +23,13 @@
 
 ## Acceptance criteria
 
-- [ ] `src/pipeline/indexer_ops.py` 존재하고, 인덱서 실행·폴링·대기 함수 제공
-- [ ] `src/pipeline/legal_pipeline.py` 존재하고, 4개 법률 파이프라인 생성 함수 제공
-- [ ] `src/pipeline/multimodal_pipeline.py` 존재하고, Basic/Verbalized 파이프라인 생성 함수 제공
-- [ ] nb01에서 `subprocess` 호출 없이 `src.pipeline` import로 파이프라인 설정 가능
-- [ ] nb03에서 `subprocess` 호출 없이 `src.pipeline` import로 파이프라인 설정 + 인덱서 폴링 가능
-- [ ] nb05에서 `subprocess` 호출 없이 `src.pipeline` import로 파이프라인 설정 + 인덱서 폴링 가능
-- [ ] nb03과 nb05의 인덱서 폴링 코드가 `indexer_ops.py`를 공유 (중복 없음)
+- [x] `src/pipeline/indexer_ops.py` 존재하고, 인덱서 실행·폴링·대기 함수 제공
+- [x] `src/pipeline/legal_pipeline.py` 존재하고, 4개 법률 파이프라인 생성 함수 제공
+- [x] `src/pipeline/multimodal_pipeline.py` 존재하고, Basic/Verbalized 파이프라인 생성 함수 제공
+- [x] nb01에서 `subprocess` 호출 없이 `src.pipeline` import로 파이프라인 설정 가능
+- [x] nb03에서 `subprocess` 호출 없이 `src.pipeline` import로 파이프라인 설정 + 인덱서 폴링 가능
+- [x] nb05에서 `subprocess` 호출 없이 `src.pipeline` import로 파이프라인 설정 + 인덱서 폴링 가능
+- [x] nb03과 nb05의 인덱서 폴링 코드가 `indexer_ops.py`를 공유 (중복 없음)
 
 ## Blocked by
 
