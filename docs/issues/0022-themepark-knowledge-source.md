@@ -1,6 +1,6 @@
 # 0022: 테마파크 Knowledge Source 파이프라인
 
-**Status:** 🔲 대기  
+**Status:** done
 **Parent:** [PRD-themepark-and-academic-field](../prd/PRD-themepark-and-academic-field.md)
 
 ## 요약

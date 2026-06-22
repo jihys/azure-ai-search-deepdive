@@ -1,6 +1,6 @@
 # PRD: B-1~B-4 Markdown Header 기반 시맨틱 청킹 전환
 
-**Status:** ✅ 구현 완료
+**Status:** done
 **Author:** jihys
 **Created:** 2026-06-16
 

@@ -1,6 +1,6 @@
 # PRD: 테마파크 Knowledge Source + 논문 분야 필터 추가
 
-**Status:** 🔲 대기
+**Status:** ready-for-agent
 
 ## 요약
 

@@ -1,6 +1,6 @@
 # 0021: 논문 분야 필터 필드 추가 (academic_field)
 
-**Status:** 🔲 대기  
+**Status:** done
 **Parent:** [PRD-themepark-and-academic-field](../prd/PRD-themepark-and-academic-field.md)
 
 ## 요약

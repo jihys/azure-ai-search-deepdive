@@ -1,6 +1,6 @@
 # 0023: 테마파크 쿼리 데모
 
-**Status:** 🔲 대기  
+**Status:** ready-for-agent
 **Parent:** [PRD-themepark-and-academic-field](../prd/PRD-themepark-and-academic-field.md)
 
 ## 요약
