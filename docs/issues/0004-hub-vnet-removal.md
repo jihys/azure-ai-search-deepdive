@@ -1,7 +1,7 @@
 # Hub/VNet 모듈 제거 (sweden-public)
 
-**Status**: done
-**Parent**: [PRD-cleanup.md](../prd/PRD-cleanup.md)
+**Status:** done
+**Parent:** [PRD-cleanup.md](../prd/PRD-cleanup.md)
 
 ## What to build
 

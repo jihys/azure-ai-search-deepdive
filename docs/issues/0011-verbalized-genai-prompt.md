@@ -1,7 +1,7 @@
 # 0011 — B-3/B-4 Verbalized 파이프라인: Custom Verbalize → GenAI Prompt Skill
 
-**Status**: done
-**Parent**: [PRD-builtin-skills.md](../prd/PRD-builtin-skills.md)
+**Status:** done
+**Parent:** [PRD-builtin-skills.md](../prd/PRD-builtin-skills.md)
 
 ## What to build
 

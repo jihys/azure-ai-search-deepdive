@@ -1,7 +1,7 @@
 # 0010 — B-1/B-2 Basic 파이프라인: Custom Split → Built-in SplitSkill
 
-**Status**: done
-**Parent**: [PRD-builtin-skills.md](../prd/PRD-builtin-skills.md)
+**Status:** done
+**Parent:** [PRD-builtin-skills.md](../prd/PRD-builtin-skills.md)
 
 ## What to build
 

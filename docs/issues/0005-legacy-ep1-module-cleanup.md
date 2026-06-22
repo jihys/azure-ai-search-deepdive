@@ -1,7 +1,7 @@
 # 레거시 EP1 Bicep 모듈 삭제
 
-**Status**: done
-**Parent**: [PRD-cleanup.md](../prd/PRD-cleanup.md)
+**Status:** done
+**Parent:** [PRD-cleanup.md](../prd/PRD-cleanup.md)
 
 ## What to build
 

@@ -1,7 +1,7 @@
 # 전체 노트북 순차 실행 검증
 
-**Status**: done
-**Parent**: [PRD-cleanup.md](../prd/PRD-cleanup.md)
+**Status:** done
+**Parent:** [PRD-cleanup.md](../prd/PRD-cleanup.md)
 
 ## What to build
 

@@ -1,7 +1,7 @@
 # 0015 — CONTEXT.md + AGENTS.md + copilot-instructions.md 업데이트
 
-**Status**: done
-**Parent**: [PRD-doc-sync.md](../prd/PRD-doc-sync.md)
+**Status:** done
+**Parent:** [PRD-doc-sync.md](../prd/PRD-doc-sync.md)
 
 ## What to build
 

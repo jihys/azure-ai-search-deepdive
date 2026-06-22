@@ -1,7 +1,7 @@
 # Function App 올바른 코드 재배포 및 타임아웃 확장
 
-**Status**: done
-**Parent**: N/A (legacy issue)
+**Status:** done
+**Parent:** N/A (legacy issue)
 
 ## What to build
 

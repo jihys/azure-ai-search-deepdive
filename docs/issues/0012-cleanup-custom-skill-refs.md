@@ -1,7 +1,7 @@
 # 0012 — Custom Skill 참조 제거 + 노트북 정리
 
-**Status**: done
-**Parent**: [PRD-builtin-skills.md](../prd/PRD-builtin-skills.md)
+**Status:** done
+**Parent:** [PRD-builtin-skills.md](../prd/PRD-builtin-skills.md)
 
 ## What to build
 

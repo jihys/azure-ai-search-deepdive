@@ -1,7 +1,7 @@
 # 0020 — Header 청킹 테스트 업데이트
 
-**Status**: done
-**Parent**: [PRD-header-chunking.md](../prd/PRD-header-chunking.md)
+**Status:** done
+**Parent:** [PRD-header-chunking.md](../prd/PRD-header-chunking.md)
 
 ## What to build
 

@@ -1,7 +1,7 @@
 # 파일 정리: 죽은 코드 삭제 + data 정리 + 리포트 이동
 
-**Status**: done
-**Parent**: [PRD-cleanup.md](../prd/PRD-cleanup.md)
+**Status:** done
+**Parent:** [PRD-cleanup.md](../prd/PRD-cleanup.md)
 
 ## What to build
 

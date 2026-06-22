@@ -1,7 +1,7 @@
 # 0019 — B-3/B-4 Verbalized 파이프라인: Header 청킹 + 이미지 별도 청크
 
-**Status**: done
-**Parent**: [PRD-header-chunking.md](../prd/PRD-header-chunking.md)
+**Status:** done
+**Parent:** [PRD-header-chunking.md](../prd/PRD-header-chunking.md)
 
 ## What to build
 

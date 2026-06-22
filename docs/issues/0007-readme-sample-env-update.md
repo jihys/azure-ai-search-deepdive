@@ -1,7 +1,7 @@
 # 0007: README.md / sample.env sweden-public 기본 배포 기준 업데이트
 
-**Status**: done
-**Parent**: N/A (legacy issue)
+**Status:** done
+**Parent:** N/A (legacy issue)
 
 **Created**: 2026-06-15
 
