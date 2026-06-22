@@ -1,5 +1,7 @@
 # PRD: Custom WebAPI Skill → Built-in Skill 전환
 
+**Status:** unspecified
+
 ## Problem Statement
 
 현재 멀티모달 파이프라인(B-1~B-4)이 Custom WebAPI Skill (Azure Function)에 의존하여 3가지 문제가 있다:

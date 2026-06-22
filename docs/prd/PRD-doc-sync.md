@@ -1,5 +1,7 @@
 # PRD: Built-in Skill 전환 후 문서 동기화
 
+**Status:** unspecified
+
 ## Problem Statement
 
 커밋 `e1ad50a`에서 Custom WebAPI Skill → Built-in Skill 전환이 완료되었으나, 7개 문서 파일에 31개의 구 참조가 남아 있다. 코드는 이미 Built-in Skill만 사용하지만 README, CONTEXT.md, 인프라 문서, 노트북 마크다운 셀 등이 여전히 Custom WebAPI Skill 아키텍처를 기술하고 있어 랩 참가자에게 혼란을 준다.

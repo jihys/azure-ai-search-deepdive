@@ -1,5 +1,7 @@
 # PRD: 프로젝트 구조 정리 및 코드 중복 제거
 
+**Status:** unspecified
+
 ## Problem Statement
 
 Azure AI Search Deep Dive Lab 프로젝트에 중복된 데이터, 미사용 소스코드, 일관성 없는 모듈 구조가 누적되어 있다. `src/` 디렉토리의 12개 모듈 중 실제 사용되는 것은 1개뿐이고, `scripts/` 12개 중 노트북에서 호출되는 것은 2개뿐이다. 노트북은 `subprocess`로 스크립트를 호출하거나 REST API를 인라인으로 직접 호출하고 있어 코드 중복과 유지보수 부담이 크다. `data/` 디렉토리에는 9.4GB ZIP 파일, 0바이트 빈 파일, 불필요한 크롤링 샘플이 혼재되어 있다.
