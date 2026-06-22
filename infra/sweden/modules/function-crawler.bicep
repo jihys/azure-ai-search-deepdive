@@ -19,6 +19,9 @@ param location string
 @description('리소스 이름 접미사')
 param suffix string
 
+@description('Shared Elastic Premium App Service Plan ID')
+param hostingPlanId string
+
 @description('Function App VNet integration 서브넷 ID (snet-func)')
 param funcSubnetId string
 
@@ -37,30 +40,12 @@ param crawlerLimit int = 10
 @description('Preprocess Function App 이름 (PREPROCESS_FUNCTION_URI 자동 구성용). 비우면 직접 설정 필요.')
 param preprocessFunctionAppName string = ''
 
-var planName = 'asp-crawl-ragi-${take(suffix, 8)}'
 var funcAppName = 'func-crawl-ragi-${take(suffix, 8)}'
 
 // ── RBAC Role IDs ──
 var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 var storageQueueDataContributorRoleId = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 var storageTableDataContributorRoleId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
-
-// ── Elastic Premium Plan (Linux, EP1) ──
-// EP1: 1 vCore, 3.5GB RAM, VNet integration 지원
-resource funcPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: planName
-  location: location
-  sku: {
-    name: 'EP1'
-    tier: 'ElasticPremium'
-  }
-  kind: 'elastic'
-  properties: {
-    reserved: true   // Linux 필수
-    maximumElasticWorkerCount: 5
-  }
-  tags: { project: 'rag-indexing-lab' }
-}
 
 // ── Function App (Python 3.11, Linux) ──
 resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
@@ -71,7 +56,7 @@ resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
     type: 'SystemAssigned'
   }
   properties: {
-    serverFarmId: funcPlan.id
+    serverFarmId: hostingPlanId
     httpsOnly: true
     // VNet integration: 아웃바운드 트래픽을 VNet으로 라우팅
     // → snet-func → VNet 라우팅 → snet-pep → Storage PE
@@ -147,6 +132,5 @@ output funcAppName string = funcApp.name
 output funcAppHostname string = funcApp.properties.defaultHostName
 output funcAppId string = funcApp.id
 output funcAppPrincipalId string = funcApp.identity.principalId
-output hostingPlanId string = funcPlan.id
 // Logic Apps가 호출할 HTTP 트리거 URL (인증: anonymous)
 output crawlTriggerUrl string = 'https://${funcApp.properties.defaultHostName}/api/crawl'

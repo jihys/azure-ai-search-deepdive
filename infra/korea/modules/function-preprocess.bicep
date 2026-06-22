@@ -54,6 +54,8 @@ resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: hostingPlanId
     httpsOnly: true
     virtualNetworkSubnetId: empty(funcSubnetId) ? null : funcSubnetId
+    // Storage publicNetworkAccess=Disabled 환경에서 Private Endpoint 경유 아웃바운드를 강제
+    vnetRouteAllEnabled: true
     siteConfig: {
       linuxFxVersion: 'Python|3.11'
       appSettings: [

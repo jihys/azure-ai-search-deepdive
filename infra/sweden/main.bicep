@@ -149,6 +149,20 @@ module searchToOpenAIRole 'modules/role-search-to-openai.bicep' = {
 }
 
 // ============================================
+// App Service Plan (Elastic Premium EP1)
+// Shared by: functionCrawler, functionPreprocess, functionSkills
+// ============================================
+module appServicePlan 'modules/app-service-plan.bicep' = {
+  scope: rg
+  name: 'app-service-plan-deployment-${take(suffix, 8)}'
+  params: {
+    location: location
+    suffix: suffix
+    planSku: 'EP1'
+  }
+}
+
+// ============================================
 // Azure Function App (크롤러) - EP1 + VNet Integration
 // Python 크롤러를 Azure에서 실행 (로컬 실행 대체)
 // snet-func → VNet → Storage PE로 아웃바운드 접근
@@ -159,6 +173,7 @@ module functionCrawler 'modules/function-crawler.bicep' = {
   params: {
     location: location
     suffix: suffix
+    hostingPlanId: appServicePlan.outputs.hostingPlanId
     funcSubnetId: vnet.outputs.funcSubnetId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
@@ -179,7 +194,7 @@ module functionPreprocess 'modules/function-preprocess.bicep' = {
     location: location
     suffix: suffix
     funcSubnetId: vnet.outputs.funcSubnetId
-    hostingPlanId: functionCrawler.outputs.hostingPlanId
+    hostingPlanId: appServicePlan.outputs.hostingPlanId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     rawContainerName: blobContainerName
@@ -219,7 +234,7 @@ module functionSkills 'modules/function-skills.bicep' = {
     location: location
     suffix: suffix
     funcSubnetId: vnet.outputs.funcSubnetId
-    hostingPlanId: functionCrawler.outputs.hostingPlanId
+    hostingPlanId: appServicePlan.outputs.hostingPlanId
     storageAccountName: storage.outputs.storageAccountName
     storageAccountId: storage.outputs.storageAccountId
     aiServicesAccountId: openai.outputs.accountId
