@@ -1,8 +1,7 @@
 # src/pipeline/ 모듈 생성 + 노트북 리팩터
 
-## Parent
-
-[PRD-cleanup.md](../prd/PRD-cleanup.md)
+**Status**: done
+**Parent**: [PRD-cleanup.md](../prd/PRD-cleanup.md)
 
 ## What to build
 

@@ -1,6 +1,6 @@
 # 0018 — B-1/B-2 Basic 파이프라인: DI Layout oneToMany + markdownHeaderDepth h2 전환
 
-**Status**: ✅ Done
+**Status**: done
 **Parent**: [PRD-header-chunking.md](../prd/PRD-header-chunking.md)
 
 ## What to build

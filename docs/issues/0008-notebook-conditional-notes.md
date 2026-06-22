@@ -1,6 +1,8 @@
 # 0008 — 노트북 sweden-public 조건부 안내 추가
 
 **Status**: done
+**Parent**: N/A (legacy issue)
+
 **Type**: docs
 
 ## 설명

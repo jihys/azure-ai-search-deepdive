@@ -1,6 +1,8 @@
 # 0009 — Bicep 주석 및 docstring VNet/PE 설명 정확화
 
-- **Status**: done
+**Status**: done
+**Parent**: N/A (legacy issue)
+
 - **Type**: fix/docs
 
 ## 문제
